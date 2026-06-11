@@ -49,7 +49,7 @@ This tool is built for IoT security curiosity, learning about obscure protocols,
 
 Additions in this release:
 - **Image and Text Broadcast** (Unstable) : send images and text to the target of your choice without entering the ID. (Due to the unstable packet sended to the Tag some images may appear broken).
-- **Rave & Chaos Timer** : Not Working. (Waiting Update)
+- **Rave & Chaos Timer** (broadcast): random LED + page flips on all tags in range; Chaos chains LED party, page party, and target sweep. Enable **Repeat** for continuous cycles.
 - **Mass add NFC** (`Targeted Payloads → + Quick Scan NFC`): register many tags in a row — hold each label on the Flipper’s NFC antenna, auto-save, scan the next; counter shows how many were added.
 - **LED Party** (broadcast): flash all compatible tags in range (classic + scan IR codes; repeat mode). (May take a long time to blink due to dual protocol use).
 - **LED Flash / Locator** on targeted tags.

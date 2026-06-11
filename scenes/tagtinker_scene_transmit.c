@@ -97,7 +97,10 @@ static bool tx_fast_large_mono_mode(const TagTinkerApp* app) {
 }
 
 static TagTinkerCompressionMode tx_effective_compression(const TagTinkerApp* app) {
-    return tx_is_pricer_color_m_tag(app) ? TagTinkerCompressionRaw : app->compression_mode;
+    if(tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) {
+        return TagTinkerCompressionRaw;
+    }
+    return app->compression_mode;
 }
 
 static bool tx_is_broadcast_text(const TagTinkerApp* app) {
@@ -202,6 +205,9 @@ static bool tx_send_payload_frames(
     } else if(tx_fast_large_mono_mode(app)) {
         if(data_repeats < 2U) data_repeats = 2U;
         if(data_repeats > 4U) data_repeats = 4U;
+    } else if(tx_is_hd110_panel(app)) {
+        if(data_repeats < 4U) data_repeats = 4U;
+        if(data_repeats > 8U) data_repeats = 8U;
     } else if(tx_is_large_color_panel(app)) {
         if(data_repeats < 8U) data_repeats = 8U;
         if(data_repeats > 10U) data_repeats = 10U;
@@ -222,6 +228,8 @@ static bool tx_send_payload_frames(
             }
         } else if(tx_fast_large_mono_mode(app)) {
             if(ok && ((i + 1U) % 8U) == 0U) furi_delay_ms(1U);
+        } else if(tx_is_hd110_panel(app)) {
+            if(ok && ((i + 1U) % 8U) == 0U) furi_delay_ms(2U);
         } else if(tx_is_large_color_panel(app)) {
             if(ok) furi_delay_ms(3U);
         } else if(tx_is_pricer_color_m_tag(app)) {
@@ -349,8 +357,9 @@ static bool tx_send_full_payload(
             50U);
     }
     if(ok) ok = tx_send_refresh(app, plid);
-    if(ok && tx_is_pricer_color_m_tag(app) && !tx_fast_large_mono_mode(app)) {
-        furi_delay_ms(150U);
+    if(ok && (tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) &&
+       !tx_fast_large_mono_mode(app)) {
+        furi_delay_ms(tx_is_hd110_panel(app) ? 120U : 150U);
         if(ok) ok = tx_send_refresh(app, plid);
     }
     return ok;
@@ -438,7 +447,10 @@ static bool tx_stream_text_image(TagTinkerApp* app) {
     }
 
     bool ok = tx_send_ping(app, job->plid);
-    if(ok) furi_delay_ms(tx_is_pricer_color_m_tag(app) ? 100U : 10U);
+    if(ok) {
+        furi_delay_ms(
+            tx_is_hd110_panel(app) ? 80U : tx_is_pricer_color_m_tag(app) ? 100U : 10U);
+    }
 
     uint32_t frame_index_base = 0U;
     for(uint16_t y = 0; ok && y < job->height; y = (uint16_t)(y + chunk_h)) {
@@ -503,15 +515,19 @@ static bool tx_stream_text_image(TagTinkerApp* app) {
             frame_index_base += stripe_frames;
         }
         if(ok && (uint16_t)(y + actual_h) < job->height) {
-            furi_delay_ms(tx_chunk_settle_delay_ms(job->width, actual_h, use_second_plane));
+            uint32_t settle = tx_chunk_settle_delay_ms(job->width, actual_h, use_second_plane);
+            if(tx_is_hd110_panel(app) && settle < 1000U) settle = 1000U;
+            furi_delay_ms(settle);
         }
     }
 
     if(ok) {
-        furi_delay_ms(tx_is_pricer_color_m_tag(app) ? 150U : 80U);
+        furi_delay_ms(
+            tx_is_hd110_panel(app) ? 120U : tx_is_pricer_color_m_tag(app) ? 150U : 80U);
         ok = tx_send_refresh(app, job->plid);
-        if(ok && tx_is_pricer_color_m_tag(app)) {
-            furi_delay_ms(150U);
+        if(ok && (tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) &&
+           !tx_fast_large_mono_mode(app)) {
+            furi_delay_ms(tx_is_hd110_panel(app) ? 120U : 150U);
             ok = tx_send_refresh(app, job->plid);
         }
     }
@@ -710,10 +726,11 @@ static bool tx_stream_bmp_chunked(
 
     bool ok = true;
     bool picky = tx_is_pricer_color_m_tag(app);
+    bool hd110 = tx_is_hd110_panel(app);
 
     /* One wake ping for the whole frame; per-stripe refresh causes visible bands. */
     ok = tx_send_ping(app, job->plid);
-    if(ok) furi_delay_ms(picky ? 100U : 10U);
+    if(ok) furi_delay_ms(picky ? 100U : hd110 ? 80U : 10U);
 
     uint32_t frame_index_base = 0U;
     for(uint16_t y = 0; ok && y < tx_height; y = (uint16_t)(y + chunk_h)) {
@@ -756,6 +773,7 @@ static bool tx_stream_bmp_chunked(
         if(ok && (uint16_t)(y + actual_h) < tx_height) {
             uint32_t settle = tx_chunk_settle_delay_ms(tx_width, actual_h, use_second_plane);
             if(tx_is_large_color_panel(app) && settle < 1200U) settle = 1200U;
+            if(hd110 && settle < 1000U) settle = 1000U;
             furi_delay_ms(settle);
         }
     }
@@ -763,11 +781,12 @@ static bool tx_stream_bmp_chunked(
     if(ok) {
         furi_delay_ms(tx_fast_large_mono_mode(app) ? 60U :
                        tx_is_large_color_panel(app) ? 250U :
+                       hd110 ? 120U :
                        picky ? 150U :
                                80U);
         ok = tx_send_refresh(app, job->plid);
-        if(ok && picky && !tx_fast_large_mono_mode(app)) {
-            furi_delay_ms(tx_is_large_color_panel(app) ? 250U : 150U);
+        if(ok && (picky || hd110) && !tx_fast_large_mono_mode(app)) {
+            furi_delay_ms(tx_is_large_color_panel(app) ? 250U : hd110 ? 120U : 150U);
             ok = tx_send_refresh(app, job->plid);
         }
     }
@@ -804,14 +823,18 @@ static TagTinkerLedEncoding tx_led_encoding(const TagTinkerApp* app) {
     return (TagTinkerLedEncoding)app->led_encoding;
 }
 
-static bool tx_send_ping_led(
+static bool tx_send_ping_led_ex(
     TagTinkerApp* app,
     const uint8_t plid[4],
     uint8_t color_index,
     uint16_t ping_rep,
-    uint16_t led_rep) {
+    uint16_t led_rep,
+    int16_t target_type_code) {
     const TagTinkerLedEncoding enc = tx_led_encoding(app);
     uint8_t blink_payload[6];
+    const bool classic_map = (target_type_code >= 0) ?
+                                 tagtinker_led_subcmd_use_classic_map((uint16_t)target_type_code) :
+                                 tagtinker_led_subcmd_use_classic_for_tx(app);
 
     if(enc == TagTinkerLedEncBoth) {
         tagtinker_fill_led_blink_subcmd_map(
@@ -827,13 +850,17 @@ static bool tx_send_ping_led(
     }
 
     tagtinker_fill_led_blink_payload(
-        blink_payload,
-        app->duration,
-        app->forever,
-        color_index,
-        enc,
-        tagtinker_led_subcmd_use_classic_for_tx(app));
+        blink_payload, app->duration, app->forever, color_index, enc, classic_map);
     return tx_send_ping_led_raw(app, plid, blink_payload, ping_rep, led_rep);
+}
+
+static bool tx_send_ping_led(
+    TagTinkerApp* app,
+    const uint8_t plid[4],
+    uint8_t color_index,
+    uint16_t ping_rep,
+    uint16_t led_rep) {
+    return tx_send_ping_led_ex(app, plid, color_index, ping_rep, led_rep, -1);
 }
 
 static bool tx_send_ping_page(
@@ -1036,27 +1063,64 @@ static bool tx_page_party(TagTinkerApp* app) {
     return ok;
 }
 
-static bool tx_rave(TagTinkerApp* app) {
-    if(app->target_count == 0U) return false;
+static bool tx_send_broadcast_led_color(
+    TagTinkerApp* app,
+    uint8_t color_index,
+    uint16_t rep,
+    bool classic_map) {
+    const uint8_t plid[4] = {0};
+    uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
+    uint8_t payload[6];
+    tagtinker_fill_led_blink_subcmd_map(
+        payload, app->duration, app->forever, color_index, classic_map);
+    size_t len = tagtinker_make_addressed_frame(frame, plid, payload, sizeof(payload));
+    return tagtinker_ir_transmit(frame, len, rep, 10);
+}
 
-    uint16_t ping_rep = app->repeats;
-    uint16_t page_rep = app->repeats;
-    if(ping_rep < 100U) ping_rep = 100U;
-    if(page_rep < 80U) page_rep = 80U;
+static bool tx_rave_once(TagTinkerApp* app) {
+    uint16_t rep = app->repeats;
+    if(rep < 120U) rep = 120U;
+
+    uint32_t rnd = furi_hal_random_get();
+    uint8_t color = (uint8_t)(rnd % TAGTINKER_LED_COLOR_COUNT);
+    uint8_t page = (uint8_t)((rnd >> 8) % 8U);
 
     bool ok = true;
+    ok = tx_send_broadcast_led_color(app, color, rep, true);
+    if(ok) furi_delay_ms(80);
+    if(ok) ok = tx_send_broadcast_led_color(app, color, rep, false);
+    if(ok) furi_delay_ms(120);
+
+    if(ok) {
+        uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
+        size_t len =
+            tagtinker_build_broadcast_page_frame(frame, page, app->forever, app->duration);
+        ok = tagtinker_ir_transmit(frame, len, rep, 10);
+    }
+
     for(uint8_t i = 0; ok && i < app->target_count; i++) {
         if(!app->tx_active) return false;
-        const uint8_t* plid = app->targets[i].plid;
-        uint32_t rnd = furi_hal_random_get();
-        uint8_t color = (uint8_t)(rnd % TAGTINKER_LED_COLOR_COUNT);
-        uint8_t page = (uint8_t)((rnd >> 8) % 8U);
+        const TagTinkerTarget* target = &app->targets[i];
+        rnd = furi_hal_random_get();
+        color = (uint8_t)(rnd % TAGTINKER_LED_COLOR_COUNT);
+        page = (uint8_t)((rnd >> 8) % 8U);
 
-        ok = tx_send_ping_led(app, plid, color, ping_rep, ping_rep);
+        ok = tx_send_ping_led_ex(
+            app, target->plid, color, rep, rep, (int16_t)target->profile.type_code);
         if(ok) furi_delay_ms(60);
-        if(ok) ok = tx_send_ping_page(app, plid, page, ping_rep, page_rep);
-        if(ok && (i + 1U) < app->target_count) furi_delay_ms(220);
+        if(ok) ok = tx_send_ping_page(app, target->plid, page, rep, rep);
+        if(ok && (i + 1U) < app->target_count) furi_delay_ms(200);
     }
+    return ok;
+}
+
+static bool tx_rave(TagTinkerApp* app) {
+    bool ok = true;
+    do {
+        if(!app->tx_active) return false;
+        ok = tx_rave_once(app);
+        if(ok) furi_delay_ms(350);
+    } while(ok && app->tx_spam && app->tx_active);
     return ok;
 }
 
@@ -1064,7 +1128,9 @@ static bool tx_chaos(TagTinkerApp* app) {
     bool ok = true;
     do {
         if(!app->tx_active) return false;
-        ok = tx_led_party_broadcast(app);
+        /* One LED party cycle — not tx_led_party_broadcast (that loops on Repeat
+         * internally and would never reach page flip / target sweep). */
+        ok = tx_led_party_once(app);
         if(ok && app->tx_active) ok = tx_page_party_once(app);
         if(ok && app->tx_active && app->target_count > 0U) ok = tx_led_sweep(app);
         if(ok && app->tx_active) furi_delay_ms(400);
@@ -1215,7 +1281,7 @@ static bool tx_stream_bmp_image(TagTinkerApp* app) {
 
     bool use_compressed = (app->compression_mode == TagTinkerCompressionRle) ||
                           (app->compression_mode == TagTinkerCompressionAuto && rle_bits > 0U && rle_bits < raw_bits);
-    if(tx_is_pricer_color_m_tag(app)) {
+    if(tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) {
         use_compressed = false;
     }
     
@@ -1223,12 +1289,24 @@ static bool tx_stream_bmp_image(TagTinkerApp* app) {
     uint32_t padded_bytes = (target_bits + 7U) / 8U;
     padded_bytes += (TAGTINKER_IMAGE_DATA_BYTES_PER_FRAME - (padded_bytes % TAGTINKER_IMAGE_DATA_BYTES_PER_FRAME)) % TAGTINKER_IMAGE_DATA_BYTES_PER_FRAME;
 
-    if(padded_bytes > TX_MAX_IMAGE_PARAM_BYTES) {
-        FURI_LOG_W(
-            TAGTINKER_TAG,
-            "BMP TX payload %lu B > %u, using stripes",
-            (unsigned long)padded_bytes,
-            (unsigned)TX_MAX_IMAGE_PARAM_BYTES);
+    size_t tx_pixels = (size_t)tx_width * tx_height;
+    if(use_second_plane) tx_pixels *= 2U;
+    bool force_stripes = tx_is_hd110_panel(app) || tx_pixels > TX_FULL_JOB_PIXEL_LIMIT;
+
+    if(force_stripes || padded_bytes > TX_MAX_IMAGE_PARAM_BYTES) {
+        if(force_stripes && padded_bytes <= TX_MAX_IMAGE_PARAM_BYTES) {
+            FURI_LOG_I(
+                TAGTINKER_TAG,
+                "BMP TX large panel %ux%u, using stripes",
+                (unsigned)tx_width,
+                (unsigned)tx_height);
+        } else if(padded_bytes > TX_MAX_IMAGE_PARAM_BYTES) {
+            FURI_LOG_W(
+                TAGTINKER_TAG,
+                "BMP TX payload %lu B > %u, using stripes",
+                (unsigned long)padded_bytes,
+                (unsigned)TX_MAX_IMAGE_PARAM_BYTES);
+        }
         ok = tx_stream_bmp_chunked(
             app,
             file,
