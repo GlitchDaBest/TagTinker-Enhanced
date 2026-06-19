@@ -86,14 +86,31 @@ static bool tx_is_large_color_panel(const TagTinkerApp* app) {
     return (p->width >= 600U) || (p->type_code == 1358U);
 }
 
-/* Settings toggle: quicker mono IR for type 1358 / wide mono panels (less reliable). */
+/* Settings toggle: broadcast-speed IR for large/pricer panels (less reliable). */
 static bool tx_fast_large_mono_mode(const TagTinkerApp* app) {
     if(!app || !app->fast_large_mono || app->image_tx_job.broadcast) return false;
     if(app->selected_target < 0 || app->selected_target >= app->target_count) return false;
     const TagTinkerTagProfile* p = &app->targets[app->selected_target].profile;
-    if(p->color != TagTinkerTagColorMono) return false;
+    if(p->kind != TagTinkerTagKindDotMatrix) return false;
     return (p->type_code == 1358U) || (p->type_code == TAGTINKER_TYPE_HD110) ||
-           (p->type_code == TAGTINKER_TYPE_HD110_RED) || (p->width >= 600U);
+           (p->type_code == TAGTINKER_TYPE_HD110_RED) || (p->width >= 600U) ||
+           (p->type_code == 1503U) || (p->type_code == 1605U) || (p->type_code == 1695U) ||
+           (p->type_code == 1340U) || (p->type_code == 1346U);
+}
+
+/* Broadcast + fast-targeted share the same short IR timing profile. */
+static bool tx_is_broadcast_text(const TagTinkerApp* app) {
+    return app && app->image_tx_job.broadcast && app->image_tx_job.mode == TagTinkerTxModeTextImage;
+}
+
+static bool tx_is_broadcast_bmp(const TagTinkerApp* app) {
+    return app && app->image_tx_job.broadcast && app->image_tx_job.mode == TagTinkerTxModeBmpImage;
+}
+
+static bool tx_use_fast_image_timing(const TagTinkerApp* app) {
+    if(tx_is_broadcast_text(app) || tx_is_broadcast_bmp(app)) return true;
+    if(!app || app->image_tx_job.mode == 0) return false;
+    return tx_fast_large_mono_mode(app);
 }
 
 static TagTinkerCompressionMode tx_effective_compression(const TagTinkerApp* app) {
@@ -101,14 +118,6 @@ static TagTinkerCompressionMode tx_effective_compression(const TagTinkerApp* app
         return TagTinkerCompressionRaw;
     }
     return app->compression_mode;
-}
-
-static bool tx_is_broadcast_text(const TagTinkerApp* app) {
-    return app && app->image_tx_job.broadcast && app->image_tx_job.mode == TagTinkerTxModeTextImage;
-}
-
-static bool tx_is_broadcast_bmp(const TagTinkerApp* app) {
-    return app && app->image_tx_job.broadcast && app->image_tx_job.mode == TagTinkerTxModeBmpImage;
 }
 
 static bool tx_send_frame(TagTinkerApp* app, const uint8_t* frame, size_t len, uint16_t repeats) {
@@ -127,8 +136,7 @@ static bool tx_send_refresh(TagTinkerApp* app, const uint8_t plid[4]) {
     size_t len = tagtinker_make_refresh_frame(frame, plid);
     /* Pricer often needs a stronger refresh burst to latch the framebuffer. */
     uint16_t reps = tx_is_broadcast_text(app) ? 65U :
-                    tx_is_broadcast_bmp(app) ? 50U :
-                    tx_fast_large_mono_mode(app) ? 30U :
+                    tx_use_fast_image_timing(app) ? 50U :
                     tx_is_hd110_panel(app) ? 45U :
                     tx_is_large_color_panel(app) ? 70U :
                     tx_is_pricer_color_m_tag(app) ? 60U :
@@ -186,8 +194,7 @@ static bool tx_send_payload_frames(
         if(ok) {
             furi_delay_ms(
                 tx_is_broadcast_text(app) ? 100U :
-                tx_is_broadcast_bmp(app) ? 90U :
-                tx_fast_large_mono_mode(app) ? 40U :
+                tx_use_fast_image_timing(app) ? 90U :
                 tx_is_hd110_panel(app) ? 80U :
                 tx_is_pricer_color_m_tag(app) ? 120U :
                 50U);
@@ -199,12 +206,9 @@ static bool tx_send_payload_frames(
     if(tx_is_broadcast_text(app)) {
         if(data_repeats < 7U) data_repeats = 7U;
         if(data_repeats > 10U) data_repeats = 10U;
-    } else if(tx_is_broadcast_bmp(app)) {
+    } else if(tx_use_fast_image_timing(app)) {
         if(data_repeats < 5U) data_repeats = 5U;
         if(data_repeats > 10U) data_repeats = 10U;
-    } else if(tx_fast_large_mono_mode(app)) {
-        if(data_repeats < 2U) data_repeats = 2U;
-        if(data_repeats > 4U) data_repeats = 4U;
     } else if(tx_is_hd110_panel(app)) {
         if(data_repeats < 4U) data_repeats = 4U;
         if(data_repeats > 8U) data_repeats = 8U;
@@ -222,12 +226,10 @@ static bool tx_send_payload_frames(
             (uint16_t)(frame_index_base + i),
             &payload->data[i * TAGTINKER_IMAGE_DATA_BYTES_PER_FRAME]);
         ok = tx_send_frame(app, frame, len, data_repeats);
-        if(tx_is_broadcast_text(app) || tx_is_broadcast_bmp(app)) {
+        if(tx_use_fast_image_timing(app)) {
             if(ok && ((i + 1U) % 16U) == 0U && (i + 1U) < frame_count) {
                 furi_delay_ms(1U);
             }
-        } else if(tx_fast_large_mono_mode(app)) {
-            if(ok && ((i + 1U) % 8U) == 0U) furi_delay_ms(1U);
         } else if(tx_is_hd110_panel(app)) {
             if(ok && ((i + 1U) % 8U) == 0U) furi_delay_ms(2U);
         } else if(tx_is_large_color_panel(app)) {
@@ -337,8 +339,7 @@ static bool tx_send_full_payload(
     if(ok) {
         furi_delay_ms(
             tx_is_broadcast_text(app) ? 100U :
-            tx_is_broadcast_bmp(app) ? 90U :
-            tx_fast_large_mono_mode(app) ? 40U :
+            tx_use_fast_image_timing(app) ? 90U :
             tx_is_hd110_panel(app) ? 80U :
             tx_is_pricer_color_m_tag(app) ? 120U :
             50U);
@@ -350,15 +351,14 @@ static bool tx_send_full_payload(
     if(ok) {
         furi_delay_ms(
             tx_is_broadcast_text(app) ? 160U :
-            tx_is_broadcast_bmp(app) ? 130U :
-            tx_fast_large_mono_mode(app) ? 60U :
+            tx_use_fast_image_timing(app) ? 130U :
             tx_is_hd110_panel(app) ? 120U :
             tx_is_pricer_color_m_tag(app) ? 200U :
             50U);
     }
     if(ok) ok = tx_send_refresh(app, plid);
     if(ok && (tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) &&
-       !tx_fast_large_mono_mode(app)) {
+       !tx_use_fast_image_timing(app)) {
         furi_delay_ms(tx_is_hd110_panel(app) ? 120U : 150U);
         if(ok) ok = tx_send_refresh(app, plid);
     }
@@ -449,7 +449,10 @@ static bool tx_stream_text_image(TagTinkerApp* app) {
     bool ok = tx_send_ping(app, job->plid);
     if(ok) {
         furi_delay_ms(
-            tx_is_hd110_panel(app) ? 80U : tx_is_pricer_color_m_tag(app) ? 100U : 10U);
+            tx_use_fast_image_timing(app) ? 10U :
+            tx_is_hd110_panel(app) ? 80U :
+            tx_is_pricer_color_m_tag(app) ? 100U :
+            10U);
     }
 
     uint32_t frame_index_base = 0U;
@@ -516,17 +519,25 @@ static bool tx_stream_text_image(TagTinkerApp* app) {
         }
         if(ok && (uint16_t)(y + actual_h) < job->height) {
             uint32_t settle = tx_chunk_settle_delay_ms(job->width, actual_h, use_second_plane);
-            if(tx_is_hd110_panel(app) && settle < 1000U) settle = 1000U;
+            if(tx_is_large_color_panel(app) && !tx_use_fast_image_timing(app) && settle < 1200U) {
+                settle = 1200U;
+            }
+            if(tx_is_hd110_panel(app) && !tx_use_fast_image_timing(app) && settle < 1000U) {
+                settle = 1000U;
+            }
             furi_delay_ms(settle);
         }
     }
 
     if(ok) {
         furi_delay_ms(
-            tx_is_hd110_panel(app) ? 120U : tx_is_pricer_color_m_tag(app) ? 150U : 80U);
+            tx_use_fast_image_timing(app) ? 80U :
+            tx_is_hd110_panel(app) ? 120U :
+            tx_is_pricer_color_m_tag(app) ? 150U :
+            80U);
         ok = tx_send_refresh(app, job->plid);
         if(ok && (tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) &&
-           !tx_fast_large_mono_mode(app)) {
+           !tx_use_fast_image_timing(app)) {
             furi_delay_ms(tx_is_hd110_panel(app) ? 120U : 150U);
             ok = tx_send_refresh(app, job->plid);
         }
@@ -725,12 +736,15 @@ static bool tx_stream_bmp_chunked(
         (unsigned)chunk_h);
 
     bool ok = true;
-    bool picky = tx_is_pricer_color_m_tag(app);
-    bool hd110 = tx_is_hd110_panel(app);
+    bool picky = tx_is_pricer_color_m_tag(app) && !tx_use_fast_image_timing(app);
+    bool hd110 = tx_is_hd110_panel(app) && !tx_use_fast_image_timing(app);
 
     /* One wake ping for the whole frame; per-stripe refresh causes visible bands. */
     ok = tx_send_ping(app, job->plid);
-    if(ok) furi_delay_ms(picky ? 100U : hd110 ? 80U : 10U);
+    if(ok) {
+        furi_delay_ms(
+            tx_use_fast_image_timing(app) ? 10U : picky ? 100U : hd110 ? 80U : 10U);
+    }
 
     uint32_t frame_index_base = 0U;
     for(uint16_t y = 0; ok && y < tx_height; y = (uint16_t)(y + chunk_h)) {
@@ -772,20 +786,22 @@ static bool tx_stream_bmp_chunked(
         }
         if(ok && (uint16_t)(y + actual_h) < tx_height) {
             uint32_t settle = tx_chunk_settle_delay_ms(tx_width, actual_h, use_second_plane);
-            if(tx_is_large_color_panel(app) && settle < 1200U) settle = 1200U;
+            if(tx_is_large_color_panel(app) && !tx_use_fast_image_timing(app) && settle < 1200U) {
+                settle = 1200U;
+            }
             if(hd110 && settle < 1000U) settle = 1000U;
             furi_delay_ms(settle);
         }
     }
 
     if(ok) {
-        furi_delay_ms(tx_fast_large_mono_mode(app) ? 60U :
+        furi_delay_ms(tx_use_fast_image_timing(app) ? 80U :
                        tx_is_large_color_panel(app) ? 250U :
                        hd110 ? 120U :
                        picky ? 150U :
                                80U);
         ok = tx_send_refresh(app, job->plid);
-        if(ok && (picky || hd110) && !tx_fast_large_mono_mode(app)) {
+        if(ok && (picky || hd110) && !tx_use_fast_image_timing(app)) {
             furi_delay_ms(tx_is_large_color_panel(app) ? 250U : hd110 ? 120U : 150U);
             ok = tx_send_refresh(app, job->plid);
         }

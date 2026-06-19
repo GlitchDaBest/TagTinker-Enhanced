@@ -68,9 +68,8 @@ static const TagTinkerProfileEntry profile_table[] = {
     {TAGTINKER_TYPE_COLOR_M_22, 208, 112, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
      "Pricer Color M 2.2", 0},
     {1695, 296, 152, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "Pricer Color M 2.2 296x152 EXP", 0},
-    /* SmartTAG Color (HD 200) 7.3" (type 1358): 160 x 96 mm, 800x480. Mono IR
-     * (~48 KB raw fits one transfer; red/yellow accent via separate profile later). */
-    {TAGTINKER_TYPE_COLOR_73, 800, 480, TagTinkerTagKindDotMatrix, TagTinkerTagColorMono,
+    /* SmartTAG Color (HD 200) 7.3" (type 1358): 800x480 BWR — mono + red accent plane. */
+    {TAGTINKER_TYPE_COLOR_73, 800, 480, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
      "SmartTAG Color HD200 7.3\"", 0},
 };
 

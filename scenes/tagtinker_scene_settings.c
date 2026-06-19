@@ -84,7 +84,7 @@ void tagtinker_scene_settings_on_enter(void* ctx) {
         variable_item_set_current_value_text(item, buf);
     }
 
-    item = variable_item_list_add(list, "Fast wide mono", 2, fast_large_mono_changed, app);
+    item = variable_item_list_add(list, "Fast IR upload", 2, fast_large_mono_changed, app);
     variable_item_set_current_value_index(item, app->fast_large_mono ? 1 : 0);
     variable_item_set_current_value_text(
         item, settings_toggle_labels[app->fast_large_mono ? 1 : 0]);
