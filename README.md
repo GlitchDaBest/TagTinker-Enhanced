@@ -58,7 +58,7 @@ Additions in this release:
 - **LED Flash / Locator** on targeted tags.
 - **Per-tag LED maps** (e.g. F62 type **1339**, Color M **1605** / **1503**).
 - **In-app help** (broadcast guide from the main menu).
-- **SmartTAG™ Couleur (HD 110) - 4.4"** (type **1314**, **400×300** mono graphic): Image Prep profile, striped IR upload; **Fast IR upload** in Settings for broadcast-speed targeted sends.
+- **SmartTAG™ Color (HD 110) - 4.4"** (type **1314**, **400×300** mono graphic): Image Prep profile, striped IR upload; **Fast IR upload** in Settings for broadcast-speed targeted sends.
 - **SmartTAG™ Color (HD 200) - 7.3"** (type **1358**, **800×480** **BWR**): black/white/red — use Image Prep profile **1358 RED** (2-plane BMP). Striped IR upload; enable **Fast IR upload** in Settings for targeted sends as fast as broadcast.
 
 ## Getting Started
