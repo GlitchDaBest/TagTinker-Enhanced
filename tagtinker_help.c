@@ -40,7 +40,7 @@ static const char* const help_target =
     "1358 SmartTAG Color HD200 7.3\"\n"
     "BWR — Image Prep 1358 RED.\n"
     "\n"
-    "LED Flash: one tag ping+blink.\n"
+    "LED Test: one tag ping+blink.\n"
     "LED Locator: blink until [<-].\n"
     "\n"
     "RGB LED colours via IR not\n"

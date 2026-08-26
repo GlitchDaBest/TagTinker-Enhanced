@@ -1471,6 +1471,23 @@ static int32_t tx_thread_callback(void* context) {
             ok = tx_led_locator(app);
         } else if(app->broadcast_type == TagTinkerTransmitLedRainbow) {
             ok = tx_led_rainbow_target(app);
+        } else if(app->image_tx_job.mode == TagTinkerTxModeTextImage) {
+            ok = tx_stream_text_image(app);
+        } else if(app->image_tx_job.mode == TagTinkerTxModeBmpImage) {
+            ok = tx_stream_bmp_image(app);
+        } else if(app->frame_seq_count > 0U) {
+            /* Targeted ping+LED (LED Test) and other pre-built sequences — must
+             * run before broadcast party handlers (original i12bp8 order). */
+            for(size_t i = 0; ok && i < app->frame_seq_count; i++) {
+                if(!app->tx_active) { ok = false; break; }
+                if(i > 0U) {
+                    furi_delay_ms(
+                        (app->broadcast_type == TagTinkerTransmitPingFlash) ? 80U : 20U);
+                }
+                ok = tagtinker_ir_transmit(
+                    app->frame_sequence[i], app->frame_lengths[i],
+                    tx_apply_signal_mode(app, app->frame_repeats[i]), 10);
+            }
         } else if(app->broadcast_type == TagTinkerBroadcastLedSweep) {
             ok = tx_led_sweep(app);
         } else if(app->broadcast_type == TagTinkerBroadcastLed) {
@@ -1487,22 +1504,6 @@ static int32_t tx_thread_callback(void* context) {
             ok = tx_rave(app);
         } else if(app->broadcast_type == TagTinkerBroadcastChaos) {
             ok = tx_chaos(app);
-        } else if(app->image_tx_job.mode == TagTinkerTxModeTextImage) {
-            ok = tx_stream_text_image(app);
-        } else if(app->image_tx_job.mode == TagTinkerTxModeBmpImage) {
-            ok = tx_stream_bmp_image(app);
-        } else if(app->frame_seq_count > 0) {
-            for(size_t i = 0; i < app->frame_seq_count; i++) {
-                if(!app->tx_active) { ok = false; break; }
-                if(i > 0) {
-                    furi_delay_ms(
-                        (app->broadcast_type == TagTinkerBroadcastLed) ? 80U : 20U);
-                }
-                ok = tagtinker_ir_transmit(
-                    app->frame_sequence[i], app->frame_lengths[i],
-                    tx_apply_signal_mode(app, app->frame_repeats[i]), 10);
-                if(!ok) break;
-            }
         } else {
             ok = tagtinker_ir_transmit(
                 app->frame_buf, app->frame_len, tx_apply_signal_mode(app, app->repeats), 10);
@@ -1554,6 +1555,8 @@ static void transmit_draw_cb(Canvas* canvas, void* _model) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED locator (hold)");
         } else if(app->broadcast_type == TagTinkerTransmitLedRainbow) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED rainbow");
+        } else if(app->broadcast_type == TagTinkerTransmitPingFlash) {
+            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED test");
         } else if(app->broadcast_type == TagTinkerBroadcastLedSweep) {
             char line[32];
             snprintf(line, sizeof(line), "LED sweep %u tags", (unsigned)app->target_count);

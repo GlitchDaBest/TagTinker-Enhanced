@@ -57,7 +57,7 @@ static void show_target_details(TagTinkerApp* app, const TagTinkerTarget* target
         "Image Prep: pick matching Type.\n"
         "USB log: BMP TX line on send.\n"
         "LED: flash only (no RGB yet).\n"
-        "LED Party / Flash / Locator.",
+        "LED Party / Test / Locator.",
         target->profile.model_name ? target->profile.model_name : "Unknown",
         target->profile.type_code,
         tagtinker_profile_kind_label(target->profile.kind),
@@ -94,7 +94,7 @@ void tagtinker_scene_target_actions_on_enter(void* ctx) {
         submenu_add_item(app->submenu, "WiFi Plugins", TagTinkerTargetWifiPlugins, target_actions_cb, app);
     }
 
-    submenu_add_item(app->submenu, "LED Flash", TagTinkerTargetPingFlash, target_actions_cb, app);
+    submenu_add_item(app->submenu, "LED Test", TagTinkerTargetPingFlash, target_actions_cb, app);
     submenu_add_item(app->submenu, "LED Locator", TagTinkerTargetLedLocator, target_actions_cb, app);
     submenu_add_item(app->submenu, "Delete Tag", TagTinkerTargetDeleteTag, target_actions_cb, app);
 
@@ -136,6 +136,9 @@ bool tagtinker_scene_target_actions_on_event(void* ctx, SceneManagerEvent event)
             const bool classic_first = tagtinker_led_subcmd_use_classic_map(
                 target->profile.type_code);
 
+            tagtinker_free_frame_sequence(app);
+            memset(&app->image_tx_job, 0, sizeof(app->image_tx_job));
+
             app->frame_seq_count = 4;
             app->frame_sequence = malloc(sizeof(uint8_t*) * 4);
             app->frame_lengths  = malloc(sizeof(size_t) * 4);
@@ -175,7 +178,7 @@ bool tagtinker_scene_target_actions_on_event(void* ctx, SceneManagerEvent event)
             app->frame_len = app->frame_lengths[0];
 
             app->tx_spam = false;
-            app->broadcast_type = TagTinkerBroadcastLed;
+            app->broadcast_type = TagTinkerTransmitPingFlash;
             scene_manager_next_scene(app->scene_manager, TagTinkerSceneTransmit);
         }
         return true;

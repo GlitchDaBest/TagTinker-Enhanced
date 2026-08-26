@@ -310,6 +310,7 @@ typedef enum {
     /* Used only when entering transmit from targeted actions (not broadcast menu). */
     TagTinkerTransmitLedLocator = 40,
     TagTinkerTransmitLedRainbow = 41,
+    TagTinkerTransmitPingFlash = 42,
 } TagTinkerBroadcastMenuItem;
 
 /* Target action items */
