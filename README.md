@@ -45,8 +45,7 @@ This tool is built for IoT security curiosity, learning about obscure protocols,
 
 > **TagTinker EE 0.2** (beta) — by **GlitchDaBest**. Credits (**i12bp8**, **furrtek**, **7h30th3r0n3**).
 
-<img width="1080" height="1404" alt="Screenshot_20260617_230834_Gallery" src="https://github.com/user-attachments/assets/576cee76-fd04-4004-ab79-7a4f6b281f87" />
-
+<img width="3060" height="2295" alt="0e7e167e-f102-44a8-b751-78368f98526d" src="https://github.com/user-attachments/assets/697bd1d0-165c-4afe-862a-df1d1b012011" />
 
 **Please note that TagTinker EE is a beta. Some features may be unstable or not working.**
 
