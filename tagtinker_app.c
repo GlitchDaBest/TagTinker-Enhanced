@@ -422,6 +422,7 @@ bool tagtinker_try_broadcast_fav_bmp(TagTinkerApp* app, uint8_t slot) {
     app->broadcast_type = TagTinkerBroadcastImage;
     tagtinker_prepare_bmp_tx(
         app, broadcast_plid, path, 800U, 480U, app->img_page ? app->img_page : 0U);
+    app->image_tx_job.fanout_saved = app->image_multi_fanout;
     return true;
 }
 
@@ -459,19 +460,39 @@ void tagtinker_settings_load(TagTinkerApp* app) {
     app->signal_mode = TagTinkerSignalPP4;
     app->fast_large_mono = false;
     app->restore_page_after_image = false;
+    app->image_multi_fanout = false;
     app->led_color = 0U;
     app->led_encoding = (uint8_t)TagTinkerLedEncSubcmd;
     app->led_scan_cmd = 0U;
     app->led_scan_phase = 0U;
 
     if(storage_file_open(file, APP_DATA_PATH("settings.txt"), FSAM_READ, FSOM_OPEN_EXISTING)) {
-        char buf[48];
+        char buf[64];
         uint16_t read = storage_file_read(file, buf, sizeof(buf) - 1);
         buf[read] = '\0';
         storage_file_close(file);
 
         int warn, rep, sig, fast = 0, restore = 0, led_enc = (int)TagTinkerLedEncSubcmd;
-        if(sscanf(buf, "%d|%d|%d|%d|%d|%d", &warn, &rep, &sig, &fast, &restore, &led_enc) == 6) {
+        int fanout = 0;
+        if(sscanf(
+               buf,
+               "%d|%d|%d|%d|%d|%d|%d",
+               &warn,
+               &rep,
+               &sig,
+               &fast,
+               &restore,
+               &led_enc,
+               &fanout) == 7) {
+            app->show_startup_warning = (warn != 0);
+            app->data_frame_repeats = (uint16_t)rep;
+            app->fast_large_mono = (fast != 0);
+            app->restore_page_after_image = (restore != 0);
+            if(led_enc >= 0 && led_enc <= (int)TagTinkerLedEncPricerMask) {
+                app->led_encoding = (uint8_t)led_enc;
+            }
+            app->image_multi_fanout = (fanout != 0);
+        } else if(sscanf(buf, "%d|%d|%d|%d|%d|%d", &warn, &rep, &sig, &fast, &restore, &led_enc) == 6) {
             app->show_startup_warning = (warn != 0);
             app->data_frame_repeats = (uint16_t)rep;
             app->fast_large_mono = (fast != 0);
@@ -513,17 +534,18 @@ bool tagtinker_settings_save(const TagTinkerApp* app) {
     bool ok = false;
 
     if(storage_file_open(file, APP_DATA_PATH("settings.txt"), FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
-        char buf[48];
+        char buf[64];
         int len = snprintf(
             buf,
             sizeof(buf),
-            "%d|%u|%d|%d|%d|%d",
+            "%d|%u|%d|%d|%d|%d|%d",
             app->show_startup_warning ? 1 : 0,
             app->data_frame_repeats,
             (int)TagTinkerSignalPP4,
             app->fast_large_mono ? 1 : 0,
             app->restore_page_after_image ? 1 : 0,
-            (int)app->led_encoding);
+            (int)app->led_encoding,
+            app->image_multi_fanout ? 1 : 0);
         if(len > 0 && storage_file_write(file, buf, (uint16_t)len)) {
             ok = true;
         }
@@ -889,6 +911,10 @@ static TagTinkerApp* app_alloc(void) {
     app->page = 0;
     app->duration = 15;
     app->repeats = 200;
+    app->wakeup_burst_sec = 60;
+    app->wakeup_burst_intensity = 1U; /* Strong */
+    app->wakeup_restore_page = true;
+    app->wakeup_burst_cycles = 0U;
     app->draw_x = 0;
     app->draw_y = 0;
     app->img_page = 1;

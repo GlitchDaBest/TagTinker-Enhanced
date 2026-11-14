@@ -1,4 +1,4 @@
-# TagTinker EE 0.2
+# TagTinker EE 0.3
 
 <p align="center">
   <strong>Infrared ESL Research Toolkit for Flipper Zero</strong><br>
@@ -43,22 +43,30 @@ This tool is built for IoT security curiosity, learning about obscure protocols,
 
 ## TagTinker EE (this repo)
 
-> **TagTinker EE 0.2** (beta) — by **GlitchDaBest**. Credits (**i12bp8**, **furrtek**, **7h30th3r0n3**).
+> **TagTinker EE 0.3** (beta) — by **GlitchDaBest**.
 
 <img width="3060" height="2295" alt="0e7e167e-f102-44a8-b751-78368f98526d" src="https://github.com/user-attachments/assets/697bd1d0-165c-4afe-862a-df1d1b012011" />
 
 **Please note that TagTinker EE is a beta. Some features may be unstable or not working.**
 
-Additions in this release:
-- **Image and Text Broadcast** (Unstable) : send images and text to the target of your choice without entering the ID. (Due to the unstable packet sended to the Tag some images may appear broken).
-- **Rave & Chaos Timer** (broadcast): random LED + page flips on all tags in range; Chaos chains LED party, page party, and target sweep. Enable **Repeat** for continuous cycles.
-- **Mass add NFC** (`Targeted Payloads → + Quick Scan NFC`): register many tags in a row — hold each label on the Flipper’s NFC antenna, auto-save, scan the next; counter shows how many were added.
-- **LED Party** (broadcast): flash all compatible tags in range (classic + scan IR codes; repeat mode). (May take a long time to blink due to dual protocol use).
-- **LED Flash / Locator** on targeted tags.
-- **Per-tag LED maps** (e.g. F62 type **1339**, Color M **1605** / **1503**).
-- **In-app help** (broadcast guide from the main menu).
-- **SmartTAG™ Color (HD 110) - 4.4"** (type **1314**, **400×300** mono graphic): Image Prep profile, striped IR upload; **Fast IR upload** in Settings for broadcast-speed targeted sends.
-- **SmartTAG™ Color (HD 200) - 7.3"** (type **1358**, **800×480** **BWR**): black/white/red — use Image Prep profile **1358 RED** (2-plane BMP). Striped IR upload; enable **Fast IR upload** in Settings for targeted sends as fast as broadcast.
+### What’s new in 0.3
+
+- **Multi-Targeted:** `Targeted Payloads → Multi-Targeted` — Quick Scan NFC + Add by ID, then **Send Image** to all saved tags matching the BMP `WxH` (addressed PLID only). Useful when some hardware revisions (e.g. F05 vs F08 on type **1327**) ignore broadcast image but accept targeted uploads.
+- **Wakeup Burst** (enhanced): Normal / Strong / Max intensity, burst time **15–180s**, dual classic+scan LED maps, optional page-0 restore, live cycle UI. Cancel with Back.
+- **Image EXP fan-out** (Settings, default Off): optional second pass that also pushes Image EXP to saved same-`WxH` tags after PLID-0 broadcast.
+- **Image EXP** timing slowed for more reliable PLID-0 DATA (still experimental / hardware-dependent).
+- Removed broadcast **LED Sweep**, **Rave**, and **Chaos Timer**.
+
+### Also in EE
+
+- **Image and Text Broadcast** (Unstable): send without entering an ID; some tags/revisions may ignore or corrupt the image.
+- **Mass add NFC** (`+ Quick Scan NFC`): register many tags in a row.
+- **LED Party** (broadcast): classic + scan IR maps; first blink is slow because of a heavy ping train before the LED frame.
+- **LED Test / Locator**, per-tag LED maps (e.g. F62 **1339**, Color M **1605** / **1503**).
+- **In-app help** from the main menu / target guide.
+- **SmartTAG Color M 2.2″** (**1605** / **1503**, **208×112**): LED / page / Wakeup OK; **image TX experimental** (Spectra 3100 4-color).
+- **SmartTag HD110** (**1314** mono / **1336** Red, **400×300**): match Image Prep to NFC type; **Fast IR upload** in Settings.
+- **SmartTAG Color (HD 200) 7.3″** (**1358**, **800×480** mono): striped IR upload. Red/BWR via **1340** is experimental.
 
 ## Getting Started
 
@@ -66,6 +74,7 @@ Additions in this release:
 2. Open **[i12bp8.github.io/TagTinker](https://i12bp8.github.io/TagTinker/)** in any browser, pick your tag profile, drop an image, tweak, and download the BMP.
 3. Copy the BMP into `apps_data/tagtinker/dropped/` on the SD card (over `qFlipper`, USB MTP, or whatever you use).
 4. On the Flipper open `Targeted Payloads → <your tag> → Set Image`, pick the BMP, choose a page, send.
+5. For several tags at once (same size): `Targeted Payloads → Multi-Targeted` → add tags → **Send Image**.
 
 ## FAQ
 
@@ -83,15 +92,13 @@ If you are using a custom firmware branch, custom asset packs, or a heavily modi
 
 ## Credits & Background
 
-This project is deeply indebted to the incredible public reverse-engineering work by **furrtek**. 
-To understand the underlying protocol, signal structure, and history, please read his research:
+**TagTinker EE** by **GlitchDaBest** — [github.com/GlitchDaBest/TagTinker-Enhanced](https://github.com/GlitchDaBest/TagTinker-Enhanced)
+
+Based on public reverse-engineering and the original TagTinker project:
 - **Furrtek’s ESL research:** [https://www.furrtek.org/?a=esl](https://www.furrtek.org/?a=esl)
-- **PrecIR reference implementation:** [https://github.com/furrtek/PrecIR](https://github.com/furrtek/PrecIR)
-
-TagTinker Original by **i12bp8**
-[https://github.com/i12bp8](https://github.com/i12bp8)
-
-NFC tag decoding contributed by **7h30th3r0n3**.  
+- **PrecIR:** [https://github.com/furrtek/PrecIR](https://github.com/furrtek/PrecIR)
+- **TagTinker (original)** by **i12bp8** — [https://github.com/i12bp8/TagTinker](https://github.com/i12bp8/TagTinker)
+- NFC decoding contributed by **7h30th3r0n3**
 
 ## Disclaimer
 

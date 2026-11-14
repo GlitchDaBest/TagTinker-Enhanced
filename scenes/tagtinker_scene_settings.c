@@ -9,6 +9,7 @@ enum {
     SettingsItemFrameRepeat,
     SettingsItemFastLargeMono,
     SettingsItemRestorePage,
+    SettingsItemImageMultiFanout,
     SettingsItemClearRecents,
 };
 
@@ -29,6 +30,16 @@ static void restore_page_changed(VariableItem* item) {
     uint8_t index = variable_item_get_current_value_index(item);
 
     app->restore_page_after_image = (index == 1);
+    variable_item_set_current_value_text(item, settings_toggle_labels[index]);
+
+    tagtinker_settings_save(app);
+}
+
+static void image_multi_fanout_changed(VariableItem* item) {
+    TagTinkerApp* app = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    app->image_multi_fanout = (index == 1);
     variable_item_set_current_value_text(item, settings_toggle_labels[index]);
 
     tagtinker_settings_save(app);
@@ -93,6 +104,11 @@ void tagtinker_scene_settings_on_enter(void* ctx) {
     variable_item_set_current_value_index(item, app->restore_page_after_image ? 1 : 0);
     variable_item_set_current_value_text(
         item, settings_toggle_labels[app->restore_page_after_image ? 1 : 0]);
+
+    item = variable_item_list_add(list, "Image EXP fan-out", 2, image_multi_fanout_changed, app);
+    variable_item_set_current_value_index(item, app->image_multi_fanout ? 1 : 0);
+    variable_item_set_current_value_text(
+        item, settings_toggle_labels[app->image_multi_fanout ? 1 : 0]);
 
     item = variable_item_list_add(list, "Clear Recents", 0, clear_recents_cb, app);
     variable_item_set_current_value_text(item, "");

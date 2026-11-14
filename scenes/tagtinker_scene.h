@@ -13,6 +13,7 @@ typedef enum {
     TagTinkerSceneBroadcastMenu,
     TagTinkerSceneBroadcast,
     TagTinkerSceneTargetMenu,
+    TagTinkerSceneMultiTarget,
     TagTinkerSceneTargetActions,
     TagTinkerSceneBarcodeInput,
     TagTinkerSceneTextInput,
@@ -53,6 +54,10 @@ void tagtinker_scene_broadcast_on_exit(void* ctx);
 void tagtinker_scene_target_menu_on_enter(void* ctx);
 bool tagtinker_scene_target_menu_on_event(void* ctx, SceneManagerEvent event);
 void tagtinker_scene_target_menu_on_exit(void* ctx);
+
+void tagtinker_scene_multi_target_on_enter(void* ctx);
+bool tagtinker_scene_multi_target_on_event(void* ctx, SceneManagerEvent event);
+void tagtinker_scene_multi_target_on_exit(void* ctx);
 
 void tagtinker_scene_target_actions_on_enter(void* ctx);
 bool tagtinker_scene_target_actions_on_event(void* ctx, SceneManagerEvent event);

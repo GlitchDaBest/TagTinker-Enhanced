@@ -85,13 +85,18 @@ static bool tagtinker_parse_dropped_filename(
     return true;
 }
 
+static bool synced_list_is_batch_mode(const TagTinkerApp* app) {
+    return app->broadcast_type == TagTinkerBroadcastImage ||
+           app->broadcast_type == TagTinkerTransmitMultiTarget;
+}
+
 static void dropped_images_load(TagTinkerApp* app) {
-    const bool broadcast_image = app->broadcast_type == TagTinkerBroadcastImage;
+    const bool batch_image = synced_list_is_batch_mode(app);
     const TagTinkerTarget* target = NULL;
     uint16_t target_w = 0U;
     uint16_t target_h = 0U;
 
-    if(!broadcast_image) {
+    if(!batch_image) {
         if(app->selected_target < 0 || app->selected_target >= app->target_count) return;
         target = &app->targets[app->selected_target];
         if(!tagtinker_target_supports_graphics(target)) return;
@@ -222,9 +227,15 @@ void tagtinker_scene_synced_image_list_on_enter(void* ctx) {
     dropped_images_load(app);
 
     submenu_reset(app->submenu);
-    submenu_set_header(
-        app->submenu,
-        (app->broadcast_type == TagTinkerBroadcastImage) ? "Broadcast BMP EXP" : "Set Image");
+    {
+        const char* hdr = "Set Image";
+        if(app->broadcast_type == TagTinkerBroadcastImage) {
+            hdr = "Image EXP (bcast)";
+        } else if(app->broadcast_type == TagTinkerTransmitMultiTarget) {
+            hdr = "Multi-Target Image";
+        }
+        submenu_set_header(app->submenu, hdr);
+    }
 
     if(app->synced_image_count == 0) {
         submenu_add_item(app->submenu, "No matching BMPs", 0, synced_image_list_cb, app);
@@ -232,8 +243,7 @@ void tagtinker_scene_synced_image_list_on_enter(void* ctx) {
         submenu_add_item(app->submenu, "  tagtinker/dropped/", 0, synced_image_list_cb, app);
         submenu_add_item(
             app->submenu,
-            (app->broadcast_type == TagTinkerBroadcastImage) ? "Need 208x112_name.bmp" :
-                                                               "Use Image Prep page",
+            synced_list_is_batch_mode(app) ? "Need 208x112_name.bmp" : "Use Image Prep page",
             0,
             synced_image_list_cb,
             app);
@@ -278,6 +288,7 @@ bool tagtinker_scene_synced_image_list_on_event(void* ctx, SceneManagerEvent eve
 
     TagTinkerSyncedImage* image = &app->synced_images[synced_image_menu_map[menu_idx]];
     const bool broadcast_image = app->broadcast_type == TagTinkerBroadcastImage;
+    const bool multi_image = app->broadcast_type == TagTinkerTransmitMultiTarget;
 
     app->img_page = image->page;
     app->draw_x = 0;
@@ -288,6 +299,15 @@ bool tagtinker_scene_synced_image_list_on_event(void* ctx, SceneManagerEvent eve
         const uint8_t broadcast_plid[4] = {0};
         tagtinker_prepare_bmp_tx(
             app, broadcast_plid, image->image_path, image->width, image->height, image->page);
+        /* Optional: also addressed-send to saved same-WxH (Settings). */
+        app->image_tx_job.fanout_saved = app->image_multi_fanout;
+    } else if(multi_image) {
+        const uint8_t zero_plid[4] = {0};
+        tagtinker_prepare_bmp_tx(
+            app, zero_plid, image->image_path, image->width, image->height, image->page);
+        /* Batch addressed only — no PLID-0 broadcast. */
+        app->image_tx_job.broadcast = false;
+        app->image_tx_job.fanout_saved = true;
     } else {
         if(app->selected_target < 0 || app->selected_target >= app->target_count) return true;
         TagTinkerTarget* target = &app->targets[app->selected_target];

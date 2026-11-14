@@ -25,14 +25,15 @@ typedef struct {
 } TxBmpInfo;
 
 /* Full-job threshold: if the whole image fits in memory, render it in one
- * shot instead of streaming in chunks. 49152 covers 208×112×2 = 46592
- * pixels (the most common color DM images). */
+ * shot instead of streaming in chunks. 49152 covers Color M 212×104×2 and
+ * HD M 208×112×2 (the most common color DM images). */
 #define TX_FULL_JOB_PIXEL_LIMIT 49152U
 /* IR image-param frame carries byte_count as uint16_t; payloads above this
  * must be sent in vertical stripes (800x480x2 raw = 96000 B otherwise wraps). */
 #define TX_MAX_IMAGE_PARAM_BYTES 60000U
 
 static uint16_t tx_pick_chunk_height(uint16_t width, uint16_t height, bool second_plane);
+static bool tx_stream_bmp_image(TagTinkerApp* app);
 
 static void tx_debug_log(const char* fmt, ...) {
     UNUSED(fmt);
@@ -55,10 +56,8 @@ static TagTinkerTagColor tx_target_color(const TagTinkerApp* app) {
     return app->targets[app->selected_target].profile.color;
 }
 
-/* SmartTAG Color graphic tags (2.2" 1503/1605/1695 and 7.3" 1358): same MCU path as
- * SmartTags, but (a) comp_type raw is required on many builds, and (b) IR timing is
- * pickier — without enough inter-frame time and data repeats the tag may receive RF
- * activity yet never ACK. SmartTag HD tolerates the default short gaps. */
+/* SmartTAG Color graphic tags: picky IR path is HD200 (1358) + EXP 1695 only.
+ * Color M 2.2" (1503/1605) shares SmartTag HD M timing (208x112 red). */
 static bool tx_is_hd110_panel(const TagTinkerApp* app) {
     if(!app || app->selected_target < 0 || app->selected_target >= app->target_count) {
         return false;
@@ -67,6 +66,18 @@ static bool tx_is_hd110_panel(const TagTinkerApp* app) {
     return (tc == TAGTINKER_TYPE_HD110) || (tc == TAGTINKER_TYPE_HD110_RED);
 }
 
+/* Color M 2.2" (1503/1605): 48×26 mm @ 110 dpi = 208×112.
+ * Public RE (furrtek) confirms B/W + BWR 2-plane; Spectra 3100 4-color
+ * (BWRY) bitplane layout is explicitly unconfirmed — image TX is best-effort.
+ * Use PrecIR-style strong wake + raw + 2-plane BWR; never mid-DATA ping. */
+static bool tx_is_color_m_22_tag(const TagTinkerApp* app) {
+    if(!app || app->image_tx_job.broadcast) return false;
+    if(app->selected_target < 0 || app->selected_target >= app->target_count) return false;
+    uint16_t tc = app->targets[app->selected_target].profile.type_code;
+    return (tc == 1503U) || (tc == 1605U);
+}
+
+/* Picky IR path: HD200 (1358) + Color M EXP 1695 + Color M 2.2 (slow reliable). */
 static bool tx_is_pricer_color_m_tag(const TagTinkerApp* app) {
     if(app && app->image_tx_job.broadcast) {
         return false;
@@ -107,14 +118,52 @@ static bool tx_is_broadcast_bmp(const TagTinkerApp* app) {
     return app && app->image_tx_job.broadcast && app->image_tx_job.mode == TagTinkerTxModeBmpImage;
 }
 
+/* Broadcast BMP uses reliable (targeted-like) timing — F05 1327 drops
+ * fast PLID-0 DATA. Broadcast text keeps the short profile. */
 static bool tx_use_fast_image_timing(const TagTinkerApp* app) {
-    if(tx_is_broadcast_text(app) || tx_is_broadcast_bmp(app)) return true;
+    if(tx_is_broadcast_text(app)) return true;
+    if(tx_is_broadcast_bmp(app)) return false;
+    /* Color M: never use broadcast-speed timing — long raw uploads need gaps. */
+    if(tx_is_color_m_22_tag(app)) return false;
     if(!app || app->image_tx_job.mode == 0) return false;
     return tx_fast_large_mono_mode(app);
 }
 
+/* Stacked IR planes (mono + accent): required for 2bpp BMPs on small red tags
+ * (1336 HD110 Red, Color M 2.2" / HD M Red, F62…). Wide HD200-class panels use
+ * proven mono IR only. */
+static bool tx_is_wide_mono_panel(const TagTinkerTagProfile* p) {
+    if(!p) return false;
+    return (p->width >= 600U) || (p->type_code == TAGTINKER_TYPE_COLOR_73) ||
+           (p->type_code == 1319U) || (p->type_code == 1340U) || (p->type_code == 1346U);
+}
+
+static bool tx_wants_stacked_planes(
+    const TagTinkerApp* app,
+    const TagTinkerTarget* target,
+    bool has_secondary_in_bmp) {
+    if(app && app->image_tx_job.broadcast) {
+        return has_secondary_in_bmp;
+    }
+    if(target && tx_is_wide_mono_panel(&target->profile)) {
+        /* HD200 / wide: always mono plane (ignore 2bpp accent in BMP). */
+        return false;
+    }
+    /* Color M 2.2": always 2 IR planes (208x112 two-plane layout). */
+    if(target) {
+        uint16_t tc = target->profile.type_code;
+        if(tc == 1503U || tc == 1605U) return true;
+    }
+    if(has_secondary_in_bmp) return true;
+    if(!target || !tagtinker_target_supports_accent(target)) return false;
+    if(app && app->color_clear) return true;
+    return true;
+}
+
 static TagTinkerCompressionMode tx_effective_compression(const TagTinkerApp* app) {
-    if(tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) {
+    /* HD110: match stock TagTinker — allow Auto/RLE. Forced raw + stripes
+     * broke uploads that work on the original FAP. */
+    if(tx_is_pricer_color_m_tag(app) || tx_is_color_m_22_tag(app)) {
         return TagTinkerCompressionRaw;
     }
     return app->compression_mode;
@@ -128,7 +177,9 @@ static bool tx_send_frame(TagTinkerApp* app, const uint8_t* frame, size_t len, u
 static bool tx_send_ping(TagTinkerApp* app, const uint8_t plid[4]) {
     uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
     size_t len = tagtinker_make_ping_frame(frame, plid);
-    return tx_send_frame(app, frame, len, 80);
+    /* PrecIR img2dm uses ~400 wake repeats before image PARAM. */
+    uint16_t reps = tx_is_color_m_22_tag(app) ? 400U : 80U;
+    return tx_send_frame(app, frame, len, reps);
 }
 
 static bool tx_send_refresh(TagTinkerApp* app, const uint8_t plid[4]) {
@@ -216,6 +267,7 @@ static bool tx_send_payload_frames(
         if(data_repeats < 8U) data_repeats = 8U;
         if(data_repeats > 10U) data_repeats = 10U;
     } else if(tx_is_pricer_color_m_tag(app)) {
+        /* Color M 2.2 + HD200 share this branch; keep proven repeats. */
         if(data_repeats < 6U) data_repeats = 6U;
         if(data_repeats > 10U) data_repeats = 10U;
     }
@@ -235,6 +287,7 @@ static bool tx_send_payload_frames(
         } else if(tx_is_large_color_panel(app)) {
             if(ok) furi_delay_ms(3U);
         } else if(tx_is_pricer_color_m_tag(app)) {
+            /* Continuous DATA only — never ping mid-stream (aborts upload). */
             if(ok) furi_delay_ms(2U);
         } else if(ok && ((i + 1U) % 32U) == 0U && (i + 1U) < frame_count) {
             furi_delay_ms(1);
@@ -371,7 +424,7 @@ static bool tx_send_full_text_image(TagTinkerApp* app) {
         (app->selected_target >= 0) ? &app->targets[app->selected_target] : NULL;
     bool accent_capable = tagtinker_target_supports_accent(target);
     bool accent_text = accent_capable && app->color_clear;
-    bool use_second_plane = accent_capable || app->color_clear;
+    bool use_second_plane = tx_wants_stacked_planes(app, target, false);
     size_t pixel_count = (size_t)job->width * job->height;
     TagTinkerTagColor accent_color = tx_target_color(app);
 
@@ -435,7 +488,7 @@ static bool tx_stream_text_image(TagTinkerApp* app) {
         (app->selected_target >= 0) ? &app->targets[app->selected_target] : NULL;
     bool accent_capable = tagtinker_target_supports_accent(target);
     bool accent_text = accent_capable && app->color_clear;
-    bool use_second_plane = accent_capable || app->color_clear;
+    bool use_second_plane = tx_wants_stacked_planes(app, target, false);
     TagTinkerTagColor accent_color = tx_target_color(app);
     uint16_t chunk_h = tx_pick_chunk_height(job->width, job->height, use_second_plane);
     uint8_t* primary = malloc((size_t)job->width * chunk_h);
@@ -909,23 +962,6 @@ static uint32_t tx_party_delay_ms(const TagTinkerApp* app) {
     return ms;
 }
 
-static bool tx_led_sweep(TagTinkerApp* app) {
-    if(app->target_count == 0U) return false;
-
-    uint16_t ping_rep = app->repeats;
-    uint16_t led_rep = app->repeats;
-    if(ping_rep < 120U) ping_rep = 120U;
-    if(led_rep < 80U) led_rep = 80U;
-
-    bool ok = true;
-    for(uint8_t i = 0; ok && i < app->target_count; i++) {
-        if(!app->tx_active) return false;
-        ok = tx_send_ping_led(app, app->targets[i].plid, app->led_color, ping_rep, led_rep);
-        if(ok && (i + 1U) < app->target_count) furi_delay_ms(200);
-    }
-    return ok;
-}
-
 static bool tx_led_color_sweep(TagTinkerApp* app) {
     if(app->target_count == 0U) return false;
 
@@ -1079,81 +1115,6 @@ static bool tx_page_party(TagTinkerApp* app) {
     return ok;
 }
 
-static bool tx_send_broadcast_led_color(
-    TagTinkerApp* app,
-    uint8_t color_index,
-    uint16_t rep,
-    bool classic_map) {
-    const uint8_t plid[4] = {0};
-    uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
-    uint8_t payload[6];
-    tagtinker_fill_led_blink_subcmd_map(
-        payload, app->duration, app->forever, color_index, classic_map);
-    size_t len = tagtinker_make_addressed_frame(frame, plid, payload, sizeof(payload));
-    return tagtinker_ir_transmit(frame, len, rep, 10);
-}
-
-static bool tx_rave_once(TagTinkerApp* app) {
-    uint16_t rep = app->repeats;
-    if(rep < 120U) rep = 120U;
-
-    uint32_t rnd = furi_hal_random_get();
-    uint8_t color = (uint8_t)(rnd % TAGTINKER_LED_COLOR_COUNT);
-    uint8_t page = (uint8_t)((rnd >> 8) % 8U);
-
-    bool ok = true;
-    ok = tx_send_broadcast_led_color(app, color, rep, true);
-    if(ok) furi_delay_ms(80);
-    if(ok) ok = tx_send_broadcast_led_color(app, color, rep, false);
-    if(ok) furi_delay_ms(120);
-
-    if(ok) {
-        uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
-        size_t len =
-            tagtinker_build_broadcast_page_frame(frame, page, app->forever, app->duration);
-        ok = tagtinker_ir_transmit(frame, len, rep, 10);
-    }
-
-    for(uint8_t i = 0; ok && i < app->target_count; i++) {
-        if(!app->tx_active) return false;
-        const TagTinkerTarget* target = &app->targets[i];
-        rnd = furi_hal_random_get();
-        color = (uint8_t)(rnd % TAGTINKER_LED_COLOR_COUNT);
-        page = (uint8_t)((rnd >> 8) % 8U);
-
-        ok = tx_send_ping_led_ex(
-            app, target->plid, color, rep, rep, (int16_t)target->profile.type_code);
-        if(ok) furi_delay_ms(60);
-        if(ok) ok = tx_send_ping_page(app, target->plid, page, rep, rep);
-        if(ok && (i + 1U) < app->target_count) furi_delay_ms(200);
-    }
-    return ok;
-}
-
-static bool tx_rave(TagTinkerApp* app) {
-    bool ok = true;
-    do {
-        if(!app->tx_active) return false;
-        ok = tx_rave_once(app);
-        if(ok) furi_delay_ms(350);
-    } while(ok && app->tx_spam && app->tx_active);
-    return ok;
-}
-
-static bool tx_chaos(TagTinkerApp* app) {
-    bool ok = true;
-    do {
-        if(!app->tx_active) return false;
-        /* One LED party cycle — not tx_led_party_broadcast (that loops on Repeat
-         * internally and would never reach page flip / target sweep). */
-        ok = tx_led_party_once(app);
-        if(ok && app->tx_active) ok = tx_page_party_once(app);
-        if(ok && app->tx_active && app->target_count > 0U) ok = tx_led_sweep(app);
-        if(ok && app->tx_active) furi_delay_ms(400);
-    } while(app->tx_spam && app->tx_active);
-    return ok;
-}
-
 static bool tx_led_locator(TagTinkerApp* app) {
     if(app->selected_target < 0 || app->selected_target >= (int8_t)app->target_count) {
         return false;
@@ -1167,6 +1128,91 @@ static bool tx_led_locator(TagTinkerApp* app) {
         furi_delay_ms(450);
     }
     return true;
+}
+
+/*
+ * Cold-boot / deep-sleep wake: tags only listen on sparse IR windows after a
+ * battery swap. Dense ping trains + classic/scan LED maps until duration
+ * elapses (or Back cancels). Intensity scales train count, reps, and gaps.
+ */
+static bool tx_wakeup_burst(TagTinkerApp* app) {
+    if(app->selected_target < 0 || app->selected_target >= (int8_t)app->target_count) {
+        return false;
+    }
+
+    const TagTinkerTarget* target = &app->targets[app->selected_target];
+    const uint8_t* plid = target->plid;
+    const int16_t type_code = (int16_t)target->profile.type_code;
+
+    uint16_t burst_sec = app->wakeup_burst_sec;
+    if(burst_sec < 15U) burst_sec = 15U;
+    if(burst_sec > 180U) burst_sec = 180U;
+
+    uint8_t intensity = app->wakeup_burst_intensity;
+    if(intensity > 2U) intensity = 1U;
+
+    /* Normal: 2 trains / Strong: 3 / Max: 4 denser trains */
+    const uint8_t ping_trains = (uint8_t)(2U + intensity);
+    uint16_t ping_floor = (intensity == 0U) ? 200U : (intensity == 1U) ? 320U : 480U;
+    uint16_t led_rep = (intensity == 0U) ? 120U : (intensity == 1U) ? 160U : 220U;
+    uint32_t gap_ms = (intensity == 0U) ? 80U : (intensity == 1U) ? 45U : 25U;
+    uint32_t cycle_gap_ms = (intensity == 0U) ? 120U : (intensity == 1U) ? 60U : 30U;
+
+    uint32_t duration_ms = (uint32_t)burst_sec * 1000U;
+    uint32_t start = furi_get_tick();
+    app->wakeup_burst_end_tick = start + duration_ms;
+    app->wakeup_burst_cycles = 0U;
+
+    uint16_t ping_rep = app->repeats;
+    if(ping_rep < ping_floor) ping_rep = ping_floor;
+    if(ping_rep > 1200U) ping_rep = 1200U;
+
+    uint8_t ping_frame[TAGTINKER_MAX_FRAME_SIZE];
+    size_t ping_len = tagtinker_make_ping_frame(ping_frame, plid);
+
+    bool ok = true;
+    while(ok && app->tx_active) {
+        uint32_t elapsed = furi_get_tick() - start;
+        if(elapsed >= duration_ms) break;
+
+        app->wakeup_burst_cycles++;
+
+        /* Dense wake trains: catch sparse listen windows after deep sleep. */
+        for(uint8_t t = 0; ok && t < ping_trains && app->tx_active; t++) {
+            ok = tagtinker_ir_transmit(ping_frame, ping_len, ping_rep, 10);
+            if(ok && (t + 1U) < ping_trains) furi_delay_ms(gap_ms);
+        }
+        if(!ok || !app->tx_active) break;
+
+        furi_delay_ms(gap_ms);
+
+        /* Classic map (F62/HD S) then scan map (Color M) — dual coverage. */
+        uint8_t classic_payload[6];
+        uint8_t scan_payload[6];
+        tagtinker_fill_led_blink_subcmd_map(
+            classic_payload, app->duration, app->forever, app->led_color, true);
+        tagtinker_fill_led_blink_subcmd_map(
+            scan_payload, app->duration, app->forever, app->led_color, false);
+
+        ok = tx_send_ping_led_raw(app, plid, classic_payload, ping_rep, led_rep);
+        if(!ok || !app->tx_active) break;
+        furi_delay_ms(gap_ms);
+        ok = tx_send_ping_led_raw(app, plid, scan_payload, ping_rep, led_rep);
+        if(!ok || !app->tx_active) break;
+
+        /* Profile-aware LED as final ACK for types with a preferred map. */
+        ok = tx_send_ping_led_ex(
+            app, plid, app->led_color, ping_rep, led_rep, type_code);
+        if(!ok || !app->tx_active) break;
+
+        furi_delay_ms(cycle_gap_ms);
+    }
+
+    /* Optional page-0 restore — helps tags that woke but stayed on diag. */
+    if(ok && app->tx_active && app->wakeup_restore_page) {
+        ok = tx_send_ping_page(app, plid, 0U, ping_rep, led_rep);
+    }
+    return ok;
 }
 
 static bool tx_led_rainbow_target(TagTinkerApp* app) {
@@ -1191,6 +1237,81 @@ static bool tx_restore_broadcast_page0(TagTinkerApp* app) {
     uint8_t frame[TAGTINKER_MAX_FRAME_SIZE];
     size_t len = tagtinker_build_broadcast_page_frame(frame, 0U, false, 5U);
     return tagtinker_ir_transmit(frame, len, 120U, 10);
+}
+
+/* Addressed send to every saved graphics tag matching job WxH. */
+static bool tx_fanout_bmp_to_saved_targets(TagTinkerApp* app, uint8_t* step_io) {
+    if(!app || !app->image_tx_job.fanout_saved) return false;
+    if(app->target_count == 0U) return false;
+
+    TagTinkerImageTxJob orig = app->image_tx_job;
+    int8_t saved_sel = app->selected_target;
+    bool any_ok = false;
+    uint8_t step = step_io ? *step_io : 0U;
+
+    for(uint8_t i = 0; i < app->target_count && app->tx_active; i++) {
+        const TagTinkerTarget* t = &app->targets[i];
+        if(!tagtinker_target_supports_graphics(t)) continue;
+        if(t->profile.width != orig.width || t->profile.height != orig.height) continue;
+
+        app->image_fanout_index = step++;
+        app->selected_target = (int8_t)i;
+        tagtinker_prepare_bmp_tx(
+            app,
+            t->plid,
+            orig.image_path,
+            t->profile.width,
+            t->profile.height,
+            orig.page);
+        /* Keep fan-out flag off on the per-tag job so we don't recurse. */
+        app->image_tx_job.fanout_saved = false;
+        app->image_tx_job.broadcast = false;
+
+        if(tx_stream_bmp_image(app)) any_ok = true;
+        if(app->tx_active) furi_delay_ms(250);
+    }
+
+    if(step_io) *step_io = step;
+    app->image_tx_job = orig;
+    app->selected_target = saved_sel;
+    return any_ok;
+}
+
+static uint8_t tx_count_fanout_matches(const TagTinkerApp* app) {
+    uint8_t match_count = 0U;
+    for(uint8_t i = 0; i < app->target_count; i++) {
+        const TagTinkerTarget* t = &app->targets[i];
+        if(!tagtinker_target_supports_graphics(t)) continue;
+        if(t->profile.width != app->image_tx_job.width ||
+           t->profile.height != app->image_tx_job.height) {
+            continue;
+        }
+        match_count++;
+    }
+    return match_count;
+}
+
+/* Optional PLID-0 broadcast, then optional addressed fan-out to saved tags. */
+static bool tx_stream_bmp_image_with_fanout(TagTinkerApp* app) {
+    const bool do_bcast = app->image_tx_job.broadcast;
+    const uint8_t match_count =
+        app->image_tx_job.fanout_saved ? tx_count_fanout_matches(app) : 0U;
+    const bool do_fan = app->image_tx_job.fanout_saved && match_count > 0U;
+
+    app->image_fanout_total = (uint8_t)((do_bcast ? 1U : 0U) + (do_fan ? match_count : 0U));
+    if(app->image_fanout_total == 0U) return false;
+
+    bool any_ok = false;
+    uint8_t step = 0U;
+
+    if(do_bcast && app->tx_active) {
+        app->image_fanout_index = step++;
+        if(tx_stream_bmp_image(app)) any_ok = true;
+    }
+    if(do_fan && app->tx_active) {
+        if(tx_fanout_bmp_to_saved_targets(app, &step)) any_ok = true;
+    }
+    return any_ok;
 }
 
 static bool tx_stream_bmp_image(TagTinkerApp* app) {
@@ -1230,11 +1351,19 @@ static bool tx_stream_bmp_image(TagTinkerApp* app) {
     uint16_t tx_height = (job->height > 0U) ? job->height : info.height;
 
     TagTinkerTagColor accent_color = tx_target_color(app);
-    bool accent_capable =
-        accent_color == TagTinkerTagColorRed || accent_color == TagTinkerTagColorYellow;
     bool has_secondary_in_bmp = (info.bpp == 2);
-    bool use_second_plane = app->color_clear || accent_capable ||
-                            (job->broadcast && has_secondary_in_bmp);
+    const TagTinkerTarget* target =
+        (app->selected_target >= 0 && app->selected_target < app->target_count) ?
+            &app->targets[app->selected_target] :
+            NULL;
+    bool use_second_plane = tx_wants_stacked_planes(app, target, has_secondary_in_bmp);
+    FURI_LOG_I(
+        TAGTINKER_TAG,
+        "BMP TX planes=%u stacked=%c w=%u h=%u",
+        use_second_plane ? 2U : 1U,
+        use_second_plane ? 'Y' : 'N',
+        (unsigned)tx_width,
+        (unsigned)tx_height);
     /* Plane offset (in source rows) of the secondary plane in 2bpp BMPs. */
     uint16_t plane2_off_rows = info.height;
     UNUSED(accent_color);
@@ -1297,7 +1426,7 @@ static bool tx_stream_bmp_image(TagTinkerApp* app) {
 
     bool use_compressed = (app->compression_mode == TagTinkerCompressionRle) ||
                           (app->compression_mode == TagTinkerCompressionAuto && rle_bits > 0U && rle_bits < raw_bits);
-    if(tx_is_pricer_color_m_tag(app) || tx_is_hd110_panel(app)) {
+    if(tx_is_pricer_color_m_tag(app) || tx_is_color_m_22_tag(app)) {
         use_compressed = false;
     }
     
@@ -1307,7 +1436,9 @@ static bool tx_stream_bmp_image(TagTinkerApp* app) {
 
     size_t tx_pixels = (size_t)tx_width * tx_height;
     if(use_second_plane) tx_pixels *= 2U;
-    bool force_stripes = tx_is_hd110_panel(app) || tx_pixels > TX_FULL_JOB_PIXEL_LIMIT;
+    /* Do NOT force stripes for HD110 — stock TagTinker sends 400x300 in one
+     * PARAM (raw ~15 KB < 60 KB). Stripe mode is what broke EE vs original. */
+    bool force_stripes = (!tx_is_hd110_panel(app) && tx_pixels > TX_FULL_JOB_PIXEL_LIMIT);
 
     if(force_stripes || padded_bytes > TX_MAX_IMAGE_PARAM_BYTES) {
         if(force_stripes && padded_bytes <= TX_MAX_IMAGE_PARAM_BYTES) {
@@ -1469,12 +1600,16 @@ static int32_t tx_thread_callback(void* context) {
     do {
         if(app->broadcast_type == TagTinkerTransmitLedLocator) {
             ok = tx_led_locator(app);
+        } else if(app->broadcast_type == TagTinkerTransmitWakeupBurst) {
+            ok = tx_wakeup_burst(app);
         } else if(app->broadcast_type == TagTinkerTransmitLedRainbow) {
             ok = tx_led_rainbow_target(app);
         } else if(app->image_tx_job.mode == TagTinkerTxModeTextImage) {
             ok = tx_stream_text_image(app);
         } else if(app->image_tx_job.mode == TagTinkerTxModeBmpImage) {
-            ok = tx_stream_bmp_image(app);
+            ok = (app->image_tx_job.fanout_saved || app->image_tx_job.broadcast) ?
+                     tx_stream_bmp_image_with_fanout(app) :
+                     tx_stream_bmp_image(app);
         } else if(app->frame_seq_count > 0U) {
             /* Targeted ping+LED (LED Test) and other pre-built sequences — must
              * run before broadcast party handlers (original i12bp8 order). */
@@ -1488,8 +1623,6 @@ static int32_t tx_thread_callback(void* context) {
                     app->frame_sequence[i], app->frame_lengths[i],
                     tx_apply_signal_mode(app, app->frame_repeats[i]), 10);
             }
-        } else if(app->broadcast_type == TagTinkerBroadcastLedSweep) {
-            ok = tx_led_sweep(app);
         } else if(app->broadcast_type == TagTinkerBroadcastLed) {
             ok = tx_led_party_broadcast(app);
         } else if(app->broadcast_type == TagTinkerBroadcastLedColorSweep) {
@@ -1500,30 +1633,24 @@ static int32_t tx_thread_callback(void* context) {
             ok = tx_led_subcmd_scan(app);
         } else if(app->broadcast_type == TagTinkerBroadcastPageParty) {
             ok = tx_page_party(app);
-        } else if(app->broadcast_type == TagTinkerBroadcastRave) {
-            ok = tx_rave(app);
-        } else if(app->broadcast_type == TagTinkerBroadcastChaos) {
-            ok = tx_chaos(app);
         } else {
             ok = tagtinker_ir_transmit(
                 app->frame_buf, app->frame_len, tx_apply_signal_mode(app, app->repeats), 10);
         }
 
         if(app->tx_spam && app->tx_active && !app->image_tx_job.mode &&
-           app->broadcast_type != TagTinkerBroadcastLedSweep &&
            app->broadcast_type != TagTinkerBroadcastLedColorSweep &&
            app->broadcast_type != TagTinkerBroadcastLedScan &&
            app->broadcast_type != TagTinkerBroadcastPageParty &&
-           app->broadcast_type != TagTinkerBroadcastChaos &&
-           app->broadcast_type != TagTinkerTransmitLedLocator) {
+           app->broadcast_type != TagTinkerTransmitLedLocator &&
+           app->broadcast_type != TagTinkerTransmitWakeupBurst) {
             furi_delay_ms(50);
         }
     } while(app->tx_spam && app->tx_active &&
-            app->broadcast_type != TagTinkerBroadcastLedSweep &&
             app->broadcast_type != TagTinkerBroadcastLedColorSweep &&
             app->broadcast_type != TagTinkerBroadcastPageParty &&
-            app->broadcast_type != TagTinkerBroadcastChaos &&
-            app->broadcast_type != TagTinkerTransmitLedLocator);
+            app->broadcast_type != TagTinkerTransmitLedLocator &&
+            app->broadcast_type != TagTinkerTransmitWakeupBurst);
 
     if(ok && app->restore_page_after_image &&
        (app->image_tx_job.mode == TagTinkerTxModeBmpImage ||
@@ -1553,14 +1680,28 @@ static void transmit_draw_cb(Canvas* canvas, void* _model) {
     if(app->tx_active) {
         if(app->broadcast_type == TagTinkerTransmitLedLocator) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED locator (hold)");
+        } else if(app->broadcast_type == TagTinkerTransmitWakeupBurst) {
+            char line[36];
+            uint32_t now = furi_get_tick();
+            uint32_t left_ms = 0U;
+            if(app->wakeup_burst_end_tick > now) {
+                left_ms = app->wakeup_burst_end_tick - now;
+            }
+            static const char* inten[] = {"N", "S", "M"};
+            uint8_t ii = app->wakeup_burst_intensity;
+            if(ii > 2U) ii = 1U;
+            snprintf(
+                line,
+                sizeof(line),
+                "Wake %lus #%u %s",
+                (unsigned long)((left_ms + 999U) / 1000U),
+                (unsigned)app->wakeup_burst_cycles,
+                inten[ii]);
+            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, line);
         } else if(app->broadcast_type == TagTinkerTransmitLedRainbow) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED rainbow");
         } else if(app->broadcast_type == TagTinkerTransmitPingFlash) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "LED test");
-        } else if(app->broadcast_type == TagTinkerBroadcastLedSweep) {
-            char line[32];
-            snprintf(line, sizeof(line), "LED sweep %u tags", (unsigned)app->target_count);
-            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, line);
         } else if(app->broadcast_type == TagTinkerBroadcastLedColorSweep) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "Color sweep tags");
         } else if(app->broadcast_type == TagTinkerBroadcastLed) {
@@ -1581,10 +1722,26 @@ static void transmit_draw_cb(Canvas* canvas, void* _model) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, line);
         } else if(app->broadcast_type == TagTinkerBroadcastPageParty) {
             canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "Page party 0-7");
-        } else if(app->broadcast_type == TagTinkerBroadcastRave) {
-            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "Rave mode");
-        } else if(app->broadcast_type == TagTinkerBroadcastChaos) {
-            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, "Chaos timer");
+        } else if(
+            app->image_tx_job.mode == TagTinkerTxModeBmpImage &&
+            (app->image_tx_job.broadcast || app->image_tx_job.fanout_saved ||
+             app->broadcast_type == TagTinkerBroadcastImage ||
+             app->broadcast_type == TagTinkerTransmitMultiTarget)) {
+            char line[36];
+            if(app->image_fanout_total > 0U) {
+                const bool first_is_bcast =
+                    app->image_tx_job.broadcast && app->image_fanout_index == 0U;
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "Img %u/%u %s",
+                    (unsigned)(app->image_fanout_index + 1U),
+                    (unsigned)app->image_fanout_total,
+                    first_is_bcast ? "bcast" : "tag");
+            } else {
+                snprintf(line, sizeof(line), "Image send");
+            }
+            canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignTop, line);
         } else {
             canvas_draw_str_aligned(
                 canvas, 64, 28, AlignCenter, AlignTop, "Point the flipper at the tag");
@@ -1613,6 +1770,8 @@ static void transmit_draw_cb(Canvas* canvas, void* _model) {
     canvas_set_font(canvas, FontSecondary);
     if(app->tx_spam) {
         canvas_draw_str_aligned(canvas, 64, 55, AlignCenter, AlignTop, "[<-] Stop Repeat");
+    } else if(app->tx_active && app->broadcast_type == TagTinkerTransmitWakeupBurst) {
+        canvas_draw_str_aligned(canvas, 64, 55, AlignCenter, AlignTop, "[<-] Stop Burst");
     } else {
         canvas_draw_str_aligned(
             canvas, 64, 55, AlignCenter, AlignTop, app->tx_active ? "[<-] Cancel" : "[<-] Back");

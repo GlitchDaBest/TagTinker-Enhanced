@@ -1,7 +1,6 @@
 # TagTinker-Enhanced
 
-Enhanced version of [i12bp8/TagTinker](https://github.com/i12bp8/TagTinker).  
-**Author (original app):** i12bp8 · **TagTinker EE:** GlitchDaBest
+**TagTinker EE** by **GlitchDaBest** — enhanced fork of [i12bp8/TagTinker](https://github.com/i12bp8/TagTinker).
 
 ## Build & install
 

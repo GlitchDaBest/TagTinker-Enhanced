@@ -77,7 +77,12 @@ bool tagtinker_scene_barcode_input_on_event(void* ctx, SceneManagerEvent event) 
 
     uint32_t target_scene = scene_manager_get_scene_state(
         app->scene_manager, TagTinkerSceneBarcodeInput);
-    scene_manager_next_scene(app->scene_manager, target_scene);
+    /* Multi-Targeted add-by-ID: return to the hub instead of stacking it. */
+    if(target_scene == TagTinkerSceneMultiTarget) {
+        scene_manager_previous_scene(app->scene_manager);
+    } else {
+        scene_manager_next_scene(app->scene_manager, target_scene);
+    }
     return true;
 }
 

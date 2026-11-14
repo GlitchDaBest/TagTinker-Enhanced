@@ -9,7 +9,7 @@ App(
     fap_category="Infrared",
     fap_author="glitchdabest",
     fap_description="TagTinker EE (Enhanced) — beta ESL tool",
-    fap_version="0.2",
+    fap_version="0.3",
     sources=[
         "tagtinker_app.c",
         "tagtinker_help.c",
@@ -28,6 +28,7 @@ App(
         "scenes/tagtinker_scene_size_picker.c",
         "scenes/tagtinker_scene_target_actions.c",
         "scenes/tagtinker_scene_target_menu.c",
+        "scenes/tagtinker_scene_multi_target.c",
         "scenes/tagtinker_scene_text_input.c",
         "scenes/tagtinker_scene_transmit.c",
         "scenes/tagtinker_scene_text_box.c",

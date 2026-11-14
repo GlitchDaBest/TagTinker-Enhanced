@@ -28,7 +28,7 @@ static void show_target_details(TagTinkerApp* app, const TagTinkerTarget* target
     text_box_set_font(app->text_box, TextBoxFontText);
     text_box_set_focus(app->text_box, TextBoxFocusStart);
 
-    static char details_buf[640];
+    static char details_buf[768];
     snprintf(
         details_buf,
         sizeof(details_buf),
@@ -47,17 +47,21 @@ static void show_target_details(TagTinkerApp* app, const TagTinkerTarget* target
         "Common tags:\n"
         "1339 F62: LED classic (party).\n"
         "152x152 red image OK.\n"
-        "1314 HD110: 400x300 mono.\n"
-        "Use Image Prep type 1314.\n"
-        "1605/1503 = Color M 208x112 red.\n"
-        "1358 SmartTAG Color HD200 7.3\" 800x480 BWR.\n"
-        "Use Image Prep 1358 RED 2-plane BMP.\n"
+        "1314 HD110 mono / 1336 HD110 Red.\n"
+        "Both 400x300 — match NFC type.\n"
+        "1336: Image Prep type 1336 RED.\n"
+        "1314: Image Prep type 1314 mono.\n"
+        "1605/1503 = Color M 208x112.\n"
+        "Image EXP (4-color Spectra).\n"
+        "LED/page OK; BMP may not latch.\n"
+        "1358 HD200 7.3\" 800x480 mono.\n"
+        "Use Image Prep type 1358 mono.\n"
         "1318/1327 = HD M 208x112.\n"
         "1695 = 296x152 EXP only.\n"
         "Image Prep: pick matching Type.\n"
         "USB log: BMP TX line on send.\n"
         "LED: flash only (no RGB yet).\n"
-        "LED Party / Test / Locator.",
+        "LED Test / Locator / Wakeup.",
         target->profile.model_name ? target->profile.model_name : "Unknown",
         target->profile.type_code,
         tagtinker_profile_kind_label(target->profile.kind),
@@ -96,6 +100,7 @@ void tagtinker_scene_target_actions_on_enter(void* ctx) {
 
     submenu_add_item(app->submenu, "LED Test", TagTinkerTargetPingFlash, target_actions_cb, app);
     submenu_add_item(app->submenu, "LED Locator", TagTinkerTargetLedLocator, target_actions_cb, app);
+    submenu_add_item(app->submenu, "Wakeup Burst", TagTinkerTargetWakeupBurst, target_actions_cb, app);
     submenu_add_item(app->submenu, "Delete Tag", TagTinkerTargetDeleteTag, target_actions_cb, app);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, TagTinkerViewSubmenu);
@@ -187,6 +192,15 @@ bool tagtinker_scene_target_actions_on_event(void* ctx, SceneManagerEvent event)
         app->tx_spam = false;
         tagtinker_free_frame_sequence(app);
         scene_manager_next_scene(app->scene_manager, TagTinkerSceneTransmit);
+        return true;
+    case TagTinkerTargetWakeupBurst:
+        tagtinker_free_frame_sequence(app);
+        memset(&app->image_tx_job, 0, sizeof(app->image_tx_job));
+        if(app->wakeup_burst_sec < 15U) app->wakeup_burst_sec = 60U;
+        if(app->wakeup_burst_intensity > 2U) app->wakeup_burst_intensity = 1U;
+        app->broadcast_type = TagTinkerTransmitWakeupBurst;
+        app->tx_spam = false;
+        scene_manager_next_scene(app->scene_manager, TagTinkerSceneBroadcast);
         return true;
     case TagTinkerTargetDeleteTag:
         {

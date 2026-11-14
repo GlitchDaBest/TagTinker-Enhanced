@@ -1,16 +1,13 @@
-# TagTinker — Authors & contributors
+# TagTinker EE — Authors & contributors
 
-## Author
+## Author (TagTinker EE)
 
-**i12bp8** — TagTinker Flipper app, web Image Prep, WiFi plugins.  
-GitHub: [github.com/i12bp8/TagTinker](https://github.com/i12bp8/TagTinker)
+**GlitchDaBest** — TagTinker Enhanced (this repository).  
+GitHub: [github.com/GlitchDaBest/TagTinker-Enhanced](https://github.com/GlitchDaBest/TagTinker-Enhanced)
 
-## Contributors (TagTinker EE)
+## Upstream / research
 
-**GlitchDaBest** — LED party broadcast, per-tag protocol maps, simplified LED UX, in-app help.
-
-## Protocol & hardware research
-
+- **i12bp8** — original TagTinker Flipper app, web Image Prep, WiFi plugins ([github.com/i12bp8/TagTinker](https://github.com/i12bp8/TagTinker))
 - **furrtek** — ESL IR protocol research ([furrtek.org](https://www.furrtek.org/?a=esl), [PrecIR](https://github.com/furrtek/PrecIR))
 - **7h30th3r0n3** — NFC tag decoding for TagTinker
 

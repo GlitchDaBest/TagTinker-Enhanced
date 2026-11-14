@@ -40,7 +40,7 @@ static const TagTinkerProfileEntry profile_table[] = {
     {1327, 208, 112, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "SmartTag HD M Red", 0},
     {1328, 296, 128, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "SmartTag HD L Red", 0},
     {TAGTINKER_TYPE_HD110_RED, 400, 300, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
-     "SmartTag HD110 Red", 0},
+     "SmartTag HD110 Red (1336)", 0},
     /* F62 small SmartTag HD S red (type 1339, 152×152). */
     {TAGTINKER_TYPE_F62_HD_S_RED, 152, 152, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
      "F62 SmartTag HD S Red", 0},
@@ -61,15 +61,18 @@ static const TagTinkerProfileEntry profile_table[] = {
     {1627, 296, 128, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "SmartTag HD L Red", 0},
     {1628, 296, 128, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "SmartTag HD L Red", 0},
     {1639, 152, 152, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "SmartTag HD S Red", 0},
-    /* SmartTAG Color M 2.2": type 1605 is the recovered tag. It accepts the
-     * broadcast-image path with the 208x112 two-plane layout; keep 296x152 as
-     * a separate 1695 experiment instead of breaking the known-working type. */
-    {1503, 208, 112, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "Pricer Color M 2.2", 0},
+    /* SmartTAG Color M 2.2" (1503/1605): 48×26 mm @ 110 dpi = 208×112.
+     * Targeted TX: raw + 2 planes + broadcast-speed timing (RLE rejected;
+     * Auto+white was a common fail). 1695 stays 296x152 EXP / picky path. */
+    {1503, 208, 112, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
+     "SmartTAG Color M 2.2\"", 0},
     {TAGTINKER_TYPE_COLOR_M_22, 208, 112, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
-     "Pricer Color M 2.2", 0},
-    {1695, 296, 152, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,    "Pricer Color M 2.2 296x152 EXP", 0},
-    /* SmartTAG Color (HD 200) 7.3" (type 1358): 800x480 BWR — mono + red accent plane. */
-    {TAGTINKER_TYPE_COLOR_73, 800, 480, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
+     "SmartTAG Color M 2.2\"", 0},
+    {1695, 296, 152, TagTinkerTagKindDotMatrix, TagTinkerTagColorRed,
+     "SmartTAG Color M 2.2\" 296x152 EXP", 0},
+    /* SmartTAG Color (HD 200) 7.3" (type 1358): 800x480 mono IR path (proven).
+     * BWR/red accent stays experimental via type 1340 + Image Prep red profile. */
+    {TAGTINKER_TYPE_COLOR_73, 800, 480, TagTinkerTagKindDotMatrix, TagTinkerTagColorMono,
      "SmartTAG Color HD200 7.3\"", 0},
 };
 

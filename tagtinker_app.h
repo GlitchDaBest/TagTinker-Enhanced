@@ -34,7 +34,7 @@
 
 #define TAGTINKER_TAG          "TagTinker"
 #define TAGTINKER_DISPLAY_NAME "TagTinker EE"
-#define TAGTINKER_VERSION      "0.2"
+#define TAGTINKER_VERSION      "0.3"
 #define TAGTINKER_BC_LEN   17
 #define TAGTINKER_HEX_LEN  64
 #define TAGTINKER_MAX_TARGETS 16
@@ -64,6 +64,10 @@ typedef struct {
     uint16_t pos_x;
     uint16_t pos_y;
     bool broadcast;
+    /* After PLID-0 broadcast: also targeted-send to saved tags (same WxH).
+     * Works around F05-class 1327 that ignore broadcast image but accept
+     * addressed uploads. */
+    bool fanout_saved;
     char image_path[TAGTINKER_IMAGE_PATH_LEN + 1];
 } TagTinkerImageTxJob;
 
@@ -208,11 +212,21 @@ struct TagTinkerApp {
     bool show_startup_warning;
     bool fast_large_mono;
     bool restore_page_after_image;
+    /* Image EXP: also targeted-send to saved same-WxH tags after PLID-0. */
+    bool image_multi_fanout;
     uint8_t led_color;
     uint8_t led_encoding;
     uint8_t led_scan_cmd;
     uint8_t led_scan_phase;
     uint8_t nfc_rapid_added;
+    /* Cold-boot wakeup burst: loop ping+LED until this many seconds elapse. */
+    uint16_t wakeup_burst_sec;
+    uint32_t wakeup_burst_end_tick;
+    uint8_t wakeup_burst_intensity; /* 0=Normal 1=Strong 2=Max */
+    bool wakeup_restore_page; /* send page-0 after burst */
+    uint16_t wakeup_burst_cycles; /* live cycle counter for TX UI */
+    uint8_t image_fanout_index; /* 0=PLID0, 1..N=saved target */
+    uint8_t image_fanout_total;
 
     /* Indicates which mode triggered raw cmd (0=broadcast, 1=targeted) */
     uint8_t raw_mode;
@@ -291,14 +305,14 @@ typedef enum {
     TagTinkerBroadcastFlipPage,
     TagTinkerBroadcastDebugScreen,
     TagTinkerBroadcastLed,
-    TagTinkerBroadcastLedSweep,
+    TagTinkerBroadcastLedSweep, /* unused: kept for enum stability */
     TagTinkerBroadcastImage,
     TagTinkerBroadcastText,
     TagTinkerBroadcastPageParty,
     TagTinkerBroadcastLedColors,
     TagTinkerBroadcastLedColorSweep,
-    TagTinkerBroadcastRave,
-    TagTinkerBroadcastChaos,
+    TagTinkerBroadcastRave, /* unused */
+    TagTinkerBroadcastChaos, /* unused */
     TagTinkerBroadcastQuickTextSoldes,
     TagTinkerBroadcastQuickTextPromo,
     TagTinkerBroadcastQuickTextSale,
@@ -311,6 +325,9 @@ typedef enum {
     TagTinkerTransmitLedLocator = 40,
     TagTinkerTransmitLedRainbow = 41,
     TagTinkerTransmitPingFlash = 42,
+    TagTinkerTransmitWakeupBurst = 43,
+    /* Targeted batch: send image to all saved same-WxH tags (no PLID-0). */
+    TagTinkerTransmitMultiTarget = 44,
 } TagTinkerBroadcastMenuItem;
 
 /* Target action items */
@@ -326,6 +343,7 @@ typedef enum {
     TagTinkerTargetPingFlashClassic,
     TagTinkerTargetLedLocator,
     TagTinkerTargetLedRainbow,
+    TagTinkerTargetWakeupBurst,
     TagTinkerTargetDeleteTag,
 } TagTinkerTargetActionItem;
 

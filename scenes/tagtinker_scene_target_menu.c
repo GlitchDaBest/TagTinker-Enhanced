@@ -8,6 +8,7 @@ enum {
     TargetMenuScanNfc = 99,
     TargetMenuQuickScanNfc = 98,
     TargetMenuHelp = 97,
+    TargetMenuMulti = 96,
     TargetMenuAddNew = 100,
 };
 
@@ -26,6 +27,7 @@ void tagtinker_scene_target_menu_on_enter(void* ctx) {
     submenu_add_item(app->submenu, "+ Scan NFC", TargetMenuScanNfc, target_menu_cb, app);
     submenu_add_item(app->submenu, "+ Quick Scan NFC", TargetMenuQuickScanNfc, target_menu_cb, app);
     submenu_add_item(app->submenu, "+ Type Barcode", TargetMenuAddNew, target_menu_cb, app);
+    submenu_add_item(app->submenu, "Multi-Targeted", TargetMenuMulti, target_menu_cb, app);
     submenu_add_item(app->submenu, "? Help / Guide", TargetMenuHelp, target_menu_cb, app);
 
     /* List saved targets */
@@ -48,6 +50,11 @@ bool tagtinker_scene_target_menu_on_event(void* ctx, SceneManagerEvent event) {
 
     if(event.event == TargetMenuHelp) {
         tagtinker_show_text_box_help(app, TagTinkerTextBoxHelpTarget);
+        return true;
+    }
+
+    if(event.event == TargetMenuMulti) {
+        scene_manager_next_scene(app->scene_manager, TagTinkerSceneMultiTarget);
         return true;
     }
 

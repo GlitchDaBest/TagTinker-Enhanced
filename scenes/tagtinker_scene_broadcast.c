@@ -23,6 +23,30 @@ static const char* repeat_labels[] = {"50", "100", "200", "400", "800", "1200"};
 static const uint16_t repeat_values[] = {50, 100, 200, 400, 800, 1200};
 #define REPEAT_COUNT 6
 
+static void wakeup_burst_duration_changed(VariableItem* item) {
+    TagTinkerApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    static const uint16_t durations[] = {15, 30, 45, 60, 90, 120, 180};
+    static const char* dur_labels[] = {"15s", "30s", "45s", "60s", "90s", "120s", "180s"};
+    variable_item_set_current_value_text(item, dur_labels[idx]);
+    app->wakeup_burst_sec = durations[idx];
+}
+
+static void wakeup_burst_intensity_changed(VariableItem* item) {
+    TagTinkerApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    static const char* labels[] = {"Normal", "Strong", "Max"};
+    variable_item_set_current_value_text(item, labels[idx]);
+    app->wakeup_burst_intensity = idx;
+}
+
+static void wakeup_restore_page_changed(VariableItem* item) {
+    TagTinkerApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, forever_labels[idx]);
+    app->wakeup_restore_page = (idx == 1);
+}
+
 static void page_changed(VariableItem* item) {
     TagTinkerApp* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
@@ -84,13 +108,65 @@ void tagtinker_scene_broadcast_on_enter(void* context) {
 
     VariableItem* item;
 
+    /* Targeted cold-boot wake: duration + intensity + restore, then transmit. */
+    if(app->broadcast_type == TagTinkerTransmitWakeupBurst) {
+        if(app->wakeup_burst_sec < 15U) app->wakeup_burst_sec = 60U;
+        if(app->wakeup_burst_intensity > 2U) app->wakeup_burst_intensity = 1U;
+
+        item = variable_item_list_add(vil, "Burst time", 7, wakeup_burst_duration_changed, app);
+        {
+            static const uint16_t durations[] = {15, 30, 45, 60, 90, 120, 180};
+            static const char* dur_labels[] = {"15s", "30s", "45s", "60s", "90s", "120s", "180s"};
+            uint8_t dur_idx = 3; /* default 60s */
+            for(uint8_t i = 0; i < 7; i++) {
+                if(durations[i] == app->wakeup_burst_sec) {
+                    dur_idx = i;
+                    break;
+                }
+            }
+            variable_item_set_current_value_index(item, dur_idx);
+            variable_item_set_current_value_text(item, dur_labels[dur_idx]);
+        }
+
+        item = variable_item_list_add(vil, "Intensity", 3, wakeup_burst_intensity_changed, app);
+        {
+            static const char* labels[] = {"Normal", "Strong", "Max"};
+            uint8_t idx = app->wakeup_burst_intensity;
+            if(idx > 2U) idx = 1U;
+            variable_item_set_current_value_index(item, idx);
+            variable_item_set_current_value_text(item, labels[idx]);
+        }
+
+        item = variable_item_list_add(vil, "Restore page 0", 2, wakeup_restore_page_changed, app);
+        variable_item_set_current_value_index(item, app->wakeup_restore_page ? 1 : 0);
+        variable_item_set_current_value_text(
+            item, forever_labels[app->wakeup_restore_page ? 1 : 0]);
+
+        item = variable_item_list_add(vil, "Repeats", REPEAT_COUNT, repeats_changed, app);
+        {
+            uint8_t rep_idx = 2;
+            for(uint8_t i = 0; i < REPEAT_COUNT; i++) {
+                if(repeat_values[i] == app->repeats) {
+                    rep_idx = i;
+                    break;
+                }
+            }
+            variable_item_set_current_value_index(item, rep_idx);
+            variable_item_set_current_value_text(item, repeat_labels[rep_idx]);
+        }
+
+        s_transmit_row_index = 4;
+        variable_item_list_add(vil, ">> Wakeup Burst <<", 0, NULL, app);
+        variable_item_list_set_enter_callback(vil, broadcast_enter_callback, app);
+        variable_item_list_set_selected_item(vil, 0);
+        view_dispatcher_switch_to_view(app->view_dispatcher, TagTinkerViewVarItemList);
+        return;
+    }
+
     /* Build list conditionally */
     if(app->broadcast_type == TagTinkerBroadcastFlipPage ||
        app->broadcast_type == TagTinkerBroadcastPageParty ||
-       app->broadcast_type == TagTinkerBroadcastLed ||
-       app->broadcast_type == TagTinkerBroadcastLedSweep ||
-       app->broadcast_type == TagTinkerBroadcastRave ||
-       app->broadcast_type == TagTinkerBroadcastChaos) {
+       app->broadcast_type == TagTinkerBroadcastLed) {
         if(app->broadcast_type == TagTinkerBroadcastFlipPage) {
             item = variable_item_list_add(vil, "Page", 8, page_changed, app);
             variable_item_set_current_value_index(item, app->page);
@@ -134,11 +210,9 @@ void tagtinker_scene_broadcast_on_enter(void* context) {
      * the index isn't a constant. */
     if(app->broadcast_type == TagTinkerBroadcastFlipPage) {
         s_transmit_row_index = 5;
-    } else if(app->broadcast_type == TagTinkerBroadcastPageParty ||
-              app->broadcast_type == TagTinkerBroadcastRave ||
-              app->broadcast_type == TagTinkerBroadcastChaos ||
-              app->broadcast_type == TagTinkerBroadcastLed ||
-              app->broadcast_type == TagTinkerBroadcastLedSweep) {
+    } else if(
+        app->broadcast_type == TagTinkerBroadcastPageParty ||
+        app->broadcast_type == TagTinkerBroadcastLed) {
         /* Duration + Forever + Repeats + Repeat, then Transmit */
         s_transmit_row_index = 4;
     } else {
@@ -173,13 +247,22 @@ bool tagtinker_scene_broadcast_on_event(void* context, SceneManagerEvent event) 
         if(app->broadcast_type == TagTinkerBroadcastFlipPage) {
             app->frame_len = tagtinker_build_broadcast_page_frame(
                 app->frame_buf, app->page, app->forever, app->duration);
-        } else if(app->broadcast_type == TagTinkerBroadcastLedSweep ||
-                  app->broadcast_type == TagTinkerBroadcastPageParty ||
-                  app->broadcast_type == TagTinkerBroadcastRave ||
-                  app->broadcast_type == TagTinkerBroadcastChaos) {
-            tagtinker_free_frame_sequence(app);
-        } else {
+        } else if(app->broadcast_type == TagTinkerBroadcastDebugScreen) {
             app->frame_len = tagtinker_build_broadcast_debug_frame(app->frame_buf);
+        } else if(
+            app->broadcast_type == TagTinkerBroadcastLed ||
+            app->broadcast_type == TagTinkerBroadcastLedColors ||
+            app->broadcast_type == TagTinkerBroadcastLedColorSweep ||
+            app->broadcast_type == TagTinkerBroadcastLedScan ||
+            app->broadcast_type == TagTinkerBroadcastPageParty ||
+            app->broadcast_type == TagTinkerTransmitWakeupBurst) {
+            /* Party / LED modes: never build Diagnostic ("Signal lost…") frame.
+             * LED Party used to fall into the debug-frame else and brick displays. */
+            tagtinker_free_frame_sequence(app);
+            memset(&app->image_tx_job, 0, sizeof(app->image_tx_job));
+            app->frame_len = 0;
+        } else {
+            app->frame_len = 0;
         }
 
         scene_manager_next_scene(app->scene_manager, TagTinkerSceneTransmit);
